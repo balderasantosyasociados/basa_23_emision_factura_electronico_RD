@@ -1,6 +1,5 @@
-import streamlit as st
-
-st.title("🎈 My new app")
-st.write(
-    "Let's start building! For help and inspiration, head over to [docs.streamlit.io](https://docs.streamlit.io/)."
-)
+# BASA v3.0 FINAL FINAL - 1 SOLO 1 - RNC 133378711 - CLIENT DB
+import streamlit as st, json, os, hashlib, datetime, sqlite3, uuid
+from pathlib import Path
+import pandas as pd
+... (todo tu código)
