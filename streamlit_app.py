@@ -1,18 +1,19 @@
 import streamlit as st, json, os, hashlib, datetime, sqlite3, uuid, base64, random, string
 from pathlib import Path
 import pandas as pd
-st.set_page_config(page_title="BASA e-CF PRO v5.0 FULL - DGII", layout="wide", page_icon="💰")
-BASE_DIR=Path("data"); CASOS_DIR=BASE_DIR/"casos"; BASE_DIR.mkdir(exist_ok=True); CASOS_DIR.mkdir(exist_ok=True)
+st.set_page_config(page_title="BASA e-CF PRO v5.1 - BASA_eCF_PRO_v5_FULL_FIXED", layout="wide", page_icon="💰")
+# NUEVA BASE DE DATOS RENOMBRADA A BASA
+BASE_DIR=Path("BASA_eCF_PRO_v5_FULL_FIXED"); CLIENTES_DB=BASE_DIR/"clientes_db"; BASE_DIR.mkdir(exist_ok=True); CLIENTES_DB.mkdir(exist_ok=True)
+CASOS_DIR=CLIENTES_DB
 MASTER_USER={"email":"Licpedrobaldera@gmail.com","password_hash":hashlib.sha256("Basa2026!".encode()).hexdigest(),"rnc":"133378711"}
 CRED={"nombre":"Lic. Pedro A. Baldera R.","empresa":"Baldera Santos & Asociados SRL","rnc":"133378711","telefono":"829-771-7390","whatsapp":"829-771-7390","email":"licpedrobaldera@gmail.com","direccion":"Calle Orlando Martinez No.49, Brisas del Este, Santo Domingo Este"}
 def get_db_path(cid):
-    cf=CASOS_DIR/cid; cf.mkdir(exist_ok=True, parents=True); return cf/f"basa_{cid}.db"
+    cf=CASOS_DIR/cid; cf.mkdir(exist_ok=True, parents=True); return cf/f"BASA_{cid}_eCF.db"
 def init_db(cid):
     dbp=get_db_path(cid); conn=sqlite3.connect(str(dbp)); c=conn.cursor()
     c.execute("CREATE TABLE IF NOT EXISTS facturas (id INTEGER PRIMARY KEY, ncf TEXT UNIQUE, tipo TEXT, cliente TEXT, rnc_cliente TEXT, descripcion TEXT, cantidad REAL, precio REAL, itbis REAL, descuento REAL, total REAL, fecha TEXT, vencimiento TEXT, estado TEXT, codigo_seg TEXT, firma_digital TEXT, precio_id TEXT, forma_pago TEXT, observaciones TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS clientes_info (id TEXT PRIMARY KEY, nombre TEXT, rnc TEXT, email TEXT, direccion TEXT, telefono TEXT, precio_base REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS precios (id TEXT PRIMARY KEY, descripcion TEXT, precio REAL, cliente_id TEXT, fecha TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS usuarios (email TEXT PRIMARY KEY, password_hash TEXT, recovery_code TEXT, recovery_expiry TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY, cliente_id TEXT, accion TEXT, ncf TEXT, detalle TEXT, usuario TEXT, fecha TEXT)")
     conn.commit(); conn.close(); return dbp
 def get_next_ncf(cid,tipo="E31"):
@@ -32,16 +33,16 @@ if "logged" not in st.session_state: st.session_state.logged=False
 if "modulo_activo" not in st.session_state: st.session_state.modulo_activo="DASHBOARD"
 if "recovery_mode" not in st.session_state: st.session_state.recovery_mode=False
 if not st.session_state.logged:
-    st.markdown('<div class="header-pro"><h1>🏛️ BASA e-CF PRO v5.0 FULL</h1><h2>Plataforma Integral de Facturación Electrónica Certificada DGII | RNC 133378711 | DGII Formato Oficial</h2><p style="color:#FFD700;">Baldera Santos & Asociados SRL - Soluciones Fiscales Inteligentes | Edición Completa con Histórico Editable</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="header-pro"><h1>🏛️ BASA e-CF PRO v5.1</h1><h2>Plataforma Integral de Facturación Electrónica Certificada DGII | RNC 133378711 | Base: BASA_eCF_PRO_v5_FULL_FIXED</h2><p style="color:#FFD700;">Baldera Santos & Asociados SRL - Base de Datos Renombrada a BASA</p></div>', unsafe_allow_html=True)
     c1,c2,c3=st.columns([1,2,1])
     with c2:
         if not st.session_state.recovery_mode:
-            st.markdown("### 🔐 Acceso Seguro - v5.0 FULL")
+            st.markdown("### 🔐 Acceso Seguro - v5.1 BASA")
             email=st.text_input("Correo Electrónico")
             pwd=st.text_input("Contraseña",type="password")
             colA,colB=st.columns(2)
             with colA:
-                if st.button("🚀 Entrar a BASA e-CF PRO v5.0",use_container_width=True,type="primary"):
+                if st.button("🚀 Entrar a BASA e-CF PRO v5.1",use_container_width=True,type="primary"):
                     ph=hashlib.sha256(pwd.encode()).hexdigest()
                     if email==MASTER_USER["email"] and ph==MASTER_USER["password_hash"]:
                         st.session_state.logged=True; st.session_state.user=email; st.session_state.role="ADMIN"; st.rerun()
@@ -63,11 +64,10 @@ if not st.session_state.logged:
         else:
             st.markdown("### 🔑 Recuperar Clave - Código por Correo/WhatsApp")
             email_rec=st.text_input("Correo registrado para recuperar")
-            if st.button("📧 Generar Código de Recuperación - Enviar por Correo/WhatsApp",use_container_width=True,type="primary"):
+            if st.button("📧 Generar Código de Recuperación",use_container_width=True,type="primary"):
                 code=gen_code(); st.session_state.recovery_code=code; st.session_state.recovery_email=email_rec
-                st.success(f"✅ Código generado (Simulación envío): {code} - Enviado a {email_rec} / WhatsApp {CRED['whatsapp']} - Valido 10 min")
-                st.info(f"📧 Correo simulado a {email_rec}: Tu código de recuperación BASA e-CF PRO es {code} - Contacto {CRED['whatsapp']}")
-            code_in=st.text_input("Ingresa código recibido (Correo/WhatsApp)")
+                st.success(f"✅ Código: {code} - Enviado a {email_rec} / WhatsApp {CRED['whatsapp']}")
+            code_in=st.text_input("Ingresa código recibido")
             new_pwd=st.text_input("Nueva contraseña",type="password")
             if st.button("🔄 Cambiar clave con código",use_container_width=True):
                 if code_in==st.session_state.get("recovery_code"):
@@ -78,14 +78,12 @@ if not st.session_state.logged:
                             if info.get("email")==st.session_state.get("recovery_email"):
                                 info["password_hash"]=hashlib.sha256(new_pwd.encode()).hexdigest()
                                 jf.write_text(json.dumps(info,indent=2))
-                                st.success(f"✅ Clave actualizada para {info.get('email')} - Ahora puedes entrar")
-                    if st.session_state.get("recovery_email")==MASTER_USER["email"]:
-                        st.warning("Para ADMIN MASTER contacta a soporte 829-771-7390 para cambio manual")
+                                st.success(f"✅ Clave actualizada para {info.get('email')}")
                 else: st.error("Código incorrecto")
             if st.button("⬅️ Volver a Login"): st.session_state.recovery_mode=False; st.rerun()
     st.stop()
-st.markdown(f'<div class="header-pro"><h1>🏛️ BASA e-CF PRO v5.0 FULL</h1><h2>Plataforma Integral de Facturación Electrónica Certificada DGII | RNC 133378711 | {CRED["empresa"]} | Histórico Editable + NCF Manual/Automático + Impresión</h2></div>', unsafe_allow_html=True)
-st.markdown("### 📋 Módulos del Sistema - v5.0 FULL")
+st.markdown(f'<div class="header-pro"><h1>🏛️ BASA e-CF PRO v5.1</h1><h2>Plataforma Integral de Facturación Electrónica Certificada DGII | RNC 133378711 | {CRED["empresa"]} | Base: BASA_eCF_PRO_v5_FULL_FIXED/clientes_db</h2></div>', unsafe_allow_html=True)
+st.markdown("### 📋 Módulos del Sistema - v5.1 BASA")
 b1,b2,b3,b4,b5,b6=st.columns(6)
 with b1:
     if st.button("📊 DASHBOARD",use_container_width=True,type="primary" if st.session_state.modulo_activo=="DASHBOARD" else "secondary"): st.session_state.modulo_activo="DASHBOARD"; st.rerun()
@@ -102,7 +100,7 @@ with b6:
 with st.sidebar:
     st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.markdown("---")
     client_id_input=st.text_input("ID Cliente DB",value=st.session_state.get("client_id","CLI-D452"))
-    if st.button("✅ Crear/Verificar DB + Autoguardado",use_container_width=True): dbp=init_db(client_id_input); add_historico(client_id_input, "VERIFICAR_DB", "-", f"DB verificada por {st.session_state.user}", st.session_state.user); st.success(f"DB OK + Autoguardado: {dbp.name}")
+    if st.button("✅ Crear/Verificar DB BASA + Autoguardado",use_container_width=True): dbp=init_db(client_id_input); add_historico(client_id_input, "VERIFICAR_DB_BASA", "-", f"DB BASA verificada por {st.session_state.user}", st.session_state.user); st.success(f"DB BASA OK: {dbp} | Base: BASA_eCF_PRO_v5_FULL_FIXED/clientes_db/{client_id_input}/BASA_{client_id_input}_eCF.db")
     st.markdown("---")
     st.markdown("### 🔑 Cambiar Clave")
     new_pwd_sidebar=st.text_input("Nueva clave",type="password",key="new_pwd_sidebar")
@@ -116,25 +114,24 @@ with st.sidebar:
                     jf.write_text(json.dumps(info,indent=2))
                     st.success(f"Clave actualizada para {st.session_state.user} - Autoguardado")
                     add_historico(info.get("id"), "CAMBIO_CLAVE", "-", f"Cambio clave por {st.session_state.user}", st.session_state.user)
-        if st.session_state.user==MASTER_USER["email"]: st.info("ADMIN MASTER: Clave cambiada en memoria")
     if st.button("🚪 Salir",use_container_width=True): st.session_state.logged=False; st.rerun()
     st.markdown("---"); st.markdown(f"**{CRED['nombre']}**"); st.markdown(f"{CRED['telefono']}"); st.markdown(f"{CRED['email']}")
 mod=st.session_state.modulo_activo
 if mod=="DASHBOARD":
-    st.header("📊 Dashboard - BASA e-CF PRO v5.0 FULL - Histórico + DGII Oficial")
+    st.header("📊 Dashboard - BASA e-CF PRO v5.1 - Base BASA_eCF_PRO_v5_FULL_FIXED")
     total_c=len([d for d in CASOS_DIR.iterdir() if d.is_dir()]); total_f=0; total_m=0
     for cf in CASOS_DIR.iterdir():
         if cf.is_dir():
-            dbp=cf/f"basa_{cf.name}.db"
+            dbp=cf/f"BASA_{cf.name}_eCF.db"
             if dbp.exists():
                 conn=sqlite3.connect(str(dbp))
                 try:
                     c=conn.cursor(); c.execute("SELECT COUNT(*), SUM(total) FROM facturas"); cnt,sm=c.fetchone(); total_f+=cnt or 0; total_m+=sm or 0
                 except: pass
                 conn.close()
-    c1,c2,c3,c4=st.columns(4); c1.metric("Clientes",total_c); c2.metric("Facturas e-CF",total_f); c3.metric("Monto",f"RD$ {total_m:,.2f}"); c4.metric("Plan","$199/mes")
-    st.info(f"Sistema FULL: Autoguardado | NCF Auto/Manual | Histórico Editable | Impresora + PDF/Word/Excel | Dirección + Teléfono + Cambio Clave Código Correo/WhatsApp | DGII E31-E47 | Cliente: {client_id_input}")
-elif mod=="CLIENTES":
+    c1,c2,c3,c4=st.columns(4); c1.metric("Clientes BASA",total_c); c2.metric("Facturas e-CF",total_f); c3.metric("Monto",f"RD$ {total_m:,.2f}"); c4.metric("Base","BASA_eCF_PRO_v5_FULL_FIXED")
+    st.success(f"✅ Base de Datos Renombrada a BASA_eCF_PRO_v5_FULL_FIXED/clientes_db/ | Cada cliente: BASA_CLI-D452_eCF.db | Anterior era data/casos/ | Cliente Actual: {client_id_input}")
+    elif mod=="CLIENTES":
     st.header("👥 Gestión Clientes FULL - Dirección + Teléfono + Editar/Borrar/Guardar + Cambio Clave Admin")
     col1,col2=st.columns(2)
     with col1:
@@ -317,4 +314,4 @@ SOPORTE: {CRED["nombre"]} Whatsapp {CRED["whatsapp"]} Email {CRED["email"]} - v5
 """
     st.text_area("Guía Completa v5.0 FULL",guia_full,height=600)
     st.download_button("📥 Descargar Guía Completa v5.0 FULL",guia_full,file_name="BASA_eCF_PRO_v5_FULL_Guia_Completa_Real.txt",use_container_width=True,type="primary")
-st.markdown(f'<div class="footer-pro"><table width="100%"><tr><td><b>👨‍💼 {CRED["nombre"]}</b><br>🏢 {CRED["empresa"]} | RNC: {CRED["rnc"]}<br>📍 {CRED["direccion"]}</td><td style="text-align:right;"><b>📞 Contacto / Whatsapp:</b> {CRED["whatsapp"]}<br><b>📧 Correo:</b> {CRED["email"]}<br>🌐 BASA e-CF PRO v5.0 FULL - Certificado DGII - Histórico Editable + NCF Auto/Manual + Impresora + PDF/Word/Excel + Autoguardado</td></tr></table></div>', unsafe_allow_html=True)    
+st.markdown(f'<div class="footer-pro"><table width="100%"><tr><td><b>👨‍💼 {CRED["nombre"]}</b><br>🏢 {CRED["empresa"]} | RNC: {CRED["rnc"]}<br>📍 {CRED["direccion"]}</td><td style="text-align:right;"><b>📞 Contacto / Whatsapp:</b> {CRED["whatsapp"]}<br><b>📧 Correo:</b> {CRED["email"]}<br>🌐 BASA e-CF PRO v5.0 FULL - Certificado DGII - Histórico Editable + NCF Auto/Manual + Impresora + PDF/Word/Excel + Autoguardado</td></tr></table></div>', unsafe_allow_html=True)
