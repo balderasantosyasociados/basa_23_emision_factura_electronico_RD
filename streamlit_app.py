@@ -134,7 +134,7 @@ if mod=="DASHBOARD":
                 conn.close()
     c1,c2,c3,c4=st.columns(4); c1.metric("Clientes",total_c); c2.metric("Facturas e-CF",total_f); c3.metric("Monto",f"RD$ {total_m:,.2f}"); c4.metric("Plan","$199/mes")
     st.info(f"Sistema FULL: Autoguardado | NCF Auto/Manual | Histórico Editable | Impresora + PDF/Word/Excel | Dirección + Teléfono + Cambio Clave Código Correo/WhatsApp | DGII E31-E47 | Cliente: {client_id_input}")
-    elif mod=="CLIENTES":
+elif mod=="CLIENTES":
     st.header("👥 Gestión Clientes FULL - Dirección + Teléfono + Editar/Borrar/Guardar + Cambio Clave Admin")
     col1,col2=st.columns(2)
     with col1:
@@ -299,7 +299,7 @@ CREDENCIALES: {CRED["nombre"]} | Whatsapp {CRED["whatsapp"]} | Email {CRED["emai
 
 FUNCIONES NUEVAS v5.0 FULL:
 1. HISTORICO EDITABLE: Modulo HISTORICO data_editor editable, Guardar Cambios Histórico Autoguardado, Borrar NCF, Cargar Todo y Actualizar FULL, Log historico usuario/fecha, Descargar Excel/CSV
-2. CREAR NUEVO PRECIO Y AJUSTE SISTEMA: Modulo PRECIOS Crear Nuevo Precio descripcion precio fecha, tabla editable, Ajuste Sistema según Guía DGII 6_Guia_Facturacion_Electronica_1.pdf: estructura E31+10 digitos, tipos 31-47, estados, modelo Emisor->DGII->TrackID->Receptor, QR, RI Decreto 254-06
+2. CREAR NUEVO PRECIO Y AJUSTE SISTEMA: Modulo PRECIOS Crear Nuevo Precio descripcion precio fecha, tabla editable, Ajuste Sistema según Guía DGII: estructura E31+10 digitos, tipos 31-47, estados, modelo Emisor->DGII->TrackID->Receptor, QR, RI Decreto 254-06
 3. FACTURACION DGII FORMATO OFICIAL: Basado en NCF-28_Manuel_King y Guía oficial Ejemplo COMERCIAL ZYL E310000000001 150 Zapatos CAJ 550.00 14850.00 82500.00 Subtotal 334300 ITBIS 60174 Total 394474 Codigo WkT3Sa, Tipos 31-47, Estructura E+Tipo+Secuencial, Caracteristicas validez legal, Estados, RI, QR URL
 4. NCF ELECTRONICO ASIGNADO: Selector Modo NCF Automatico genera get_next_ncf E31+10 digitos Guarda NCF Automatico, Manual permite Agregar NCF Manual Casos Especiales E310000000028, anti-duplicado UNIQUE
 5. IMPRESORA Y DESCARGAR PDF/WORD/EXCEL: Boton Imprimir window.print(), Descargar PDF texto, Excel CSV/XLSX, Word DOC/DOCX, download_button
@@ -317,4 +317,4 @@ SOPORTE: {CRED["nombre"]} Whatsapp {CRED["whatsapp"]} Email {CRED["email"]} - v5
 """
     st.text_area("Guía Completa v5.0 FULL",guia_full,height=600)
     st.download_button("📥 Descargar Guía Completa v5.0 FULL",guia_full,file_name="BASA_eCF_PRO_v5_FULL_Guia_Completa_Real.txt",use_container_width=True,type="primary")
-st.markdown(f'<div class="footer-pro"><table width="100%"><tr><td><b>👨‍💼 {CRED["nombre"]}</b><br>🏢 {CRED["empresa"]} | RNC: {CRED["rnc"]}<br>📍 {CRED["direccion"]}</td><td style="text-align:right;"><b>📞 Contacto / Whatsapp:</b> {CRED["whatsapp"]}<br><b>📧 Correo:</b> {CRED["email"]}<br>🌐 BASA e-CF PRO v5.0 FULL - Certificado DGII - Histórico Editable + NCF Auto/Manual + Impresora + PDF/Word/Excel + Autoguardado</td></tr></table></div>', unsafe_allow_html=True)
+st.markdown(f'<div class="footer-pro"><table width="100%"><tr><td><b>👨‍💼 {CRED["nombre"]}</b><br>🏢 {CRED["empresa"]} | RNC: {CRED["rnc"]}<br>📍 {CRED["direccion"]}</td><td style="text-align:right;"><b>📞 Contacto / Whatsapp:</b> {CRED["whatsapp"]}<br><b>📧 Correo:</b> {CRED["email"]}<br>🌐 BASA e-CF PRO v5.0 FULL - Certificado DGII - Histórico Editable + NCF Auto/Manual + Impresora + PDF/Word/Excel + Autoguardado</td></tr></table></div>', unsafe_allow_html=True)    
