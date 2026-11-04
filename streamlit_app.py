@@ -11,215 +11,147 @@ import string
 import shutil
 from pathlib import Path
 import pandas as pd
-import requests
 
-# 💰 1. Configuración de Entorno y Directorios Locales
+st.set_page_config(page_title="BASA e-CF PRO v71 PROFESIONAL - BASA_eCF_PRO_v71_PROFESIONAL", layout="wide", page_icon="💰")
+
 BASE_DIR_NEW = Path("BASA_eCF_PRO_v71_PROFESIONAL")
 CLIENTES_DB_NEW = BASE_DIR_NEW / "clientes_db"
-BACKUP_DIR = BASE_DIR_NEW / "backup_migracion_2026"
-
 BASE_DIR_NEW.mkdir(exist_ok=True)
 CLIENTES_DB_NEW.mkdir(exist_ok=True)
+
+BACKUP_DIR = BASE_DIR_NEW / "backup_migracion_2026"
 BACKUP_DIR.mkdir(exist_ok=True)
 
-CONFIG_PATH = BASE_DIR_NEW / "basa_config.json"
-CLIENTS_JSON_PATH = BASE_DIR_NEW / "basa_clientes.json"
+CASOS_DIR = CLIENTES_DB_NEW
+BASES_VIEJAS = ["BASA_eCF_PRO_v7_0_AFILIACION", "BASA_eCF_PRO_v6_3_ENVIO_DGII_CERT", "BASA_eCF_PRO_v6_DGII_CERTIFICADO", "BASA_eCF_PRO_v6_DGII", "BASA_eCF_PRO_v5", "clientes_db"]
 
-GITHUB_REPO = "balderasantosyasociados/BASA_V7"
+MASTER_USER = {"email": "Licpedrobaldera@gmail.com", "password_hash": hashlib.sha256("Basa2026!".encode()).hexdigest(), "rnc": "133378711"}
+CRED = {"nombre": "Lic. Pedro A. Baldera R.", "empresa": "Baldera Santos & Asociados SRL", "rnc": "133378711", "telefono": "829-771-7390", "whatsapp": "829-771-7390", "email": "licpedrobaldera@gmail.com", "direccion": "Calle Orlando Martinez No.49, Brisas del Este, Santo Domingo Este"}
 
-# Carga inicial de datos de configuración por defecto
-DEFAULT_CRED = {
-    "nombre": "Lic. Pedro A. Baldera R.",
-    "empresa": "Baldera Santos & Asociados SRL",
-    "rnc": "133378711",
-    "telefono": "829-771-7390",
-    "whatsapp": "829-771-7390",
-    "email": "licpedrobaldera@gmail.com",
-    "direccion": "Calle Orlando Martinez No.49, Brisas del Este, Santo Domingo Este",
-    "logo_b64": ""
-}
+DGII_PORTAL = "https://fg.dgii.gov.do/ecf/PortalFG/login?redirectUrl=%2Fecf%2Fportalfg"
+DGII_HOME = "https://fg.dgii.gov.do/ecf/PortalFG/home"
 
-if not CONFIG_PATH.exists():
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(DEFAULT_CRED, f, indent=4, ensure_ascii=False)
-
-if not CLIENTS_JSON_PATH.exists():
-    with open(CLIENTS_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump({}, f, indent=4, ensure_ascii=False)
-
-def cargar_config_empresa():
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def guardar_config_empresa(data):
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-def cargar_clientes():
-    with open(CLIENTS_JSON_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-def guardar_clientes(data):
-    with open(CLIENTS_JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
-
-# 🐙 2. Conectividad API Automatizada a GitHub
-def crear_github_issue(titulo, descripcion, token_github):
-    url = f"https://github.com{GITHUB_REPO}/issues"
-    headers = {
-        "Authorization": f"token {token_github}",
-        "Accept": "application/vnd.github.v3+json"
-    }
-    data = {
-        "title": titulo,
-        "body": descripcion,
-        "labels": ["audit-intelligence", "automated-sync", "v71-professional"]
-    }
-    try:
-        response = requests.post(url, json=data, headers=headers)
-        if response.status_code == 201:
-            return True, response.json().get("html_url")
-        else:
-            return False, response.json().get("message", "Error de credenciales o permisos.")
-    except Exception as e:
-        return False, str(e)
-
-# 🏛️ 3. Inicialización de la Interfaz Estética en Streamlit
-def render_basa_ecf_professional():
-    empresa_data = cargar_config_empresa()
-    clientes_data = cargar_clientes()
-
-    st.markdown("""
-        <style>
-        .main-header { font-size: 26px; font-weight: 700; color: #ffffff; text-align: center; margin-bottom: 2px; }
-        .sub-header { font-size: 13px; color: #8a99ad; text-align: center; margin-bottom: 20px; }
-        .card-container { background-color: #1e2630; padding: 18px; border-radius: 8px; border: 1px solid #2d3748; margin-bottom: 15px; }
-        .footer-text { font-size: 11px; color: #5c6b73; text-align: center; margin-top: 25px; }
-        </style>
-    """, unsafe_allow_html=True)
-
-    # Mostrar logotipo corporativo cargado dinámicamente si existe
-    if empresa_data.get("logo_b64"):
-        try:
-            st.image(base64.b64decode(empresa_data["logo_b64"]), width=120)
-        except Exception:
-            pass
-
-    st.markdown(f'<div class="main-header">🏛️ {empresa_data["empresa"]}</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-header">Ecosistema e-CF PRO v71 - Integración Global Forense</div>', unsafe_allow_html=True)
-
-    # 📊 Panel Operativo Superior
-    st.markdown('<div class="card-container">', unsafe_allow_html=True)
-    col_logo, col_status = st.columns([3, 1])
-    with col_logo:
-        st.markdown("### 🌐 Audit Intelligence USA Engine")
-        st.caption(f"Sincronizado con repositorio activo: `{GITHUB_REPO}`")
-    with col_status:
-        st.success("● ONLINE")
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    # 📑 Distribución Operativa por Pestañas
-    tab1, tab2, tab3, tab4 = st.tabs([
-        "💳 Cuenta & Banca (RD)", 
-        "👥 Clientes e Historial", 
-        "🔧 Personalizar Empresa", 
-        "🚀 Entorno GitHub"
-    ])
-
-    with tab1:
-        st.write("### 🏦 Canales Seguros BHD")
-        st.info("Utilice el bloque interactivo inferior para copiar su cuenta bancaria con un solo clic.")
-        cuenta_bhd = "08694150021"
-        st.code(cuenta_bhd, language="text")
-        st.caption(f"Titular: {empresa_data['nombre']} | RNC: {empresa_data['rnc']}")
-        
-        st.markdown(
-            '<a href="https://bhd.com.do" target="_blank">'
-            '<button style="width:100%; padding:10px; background-color:#004B87; color:white; '
-            'border:none; border-radius:5px; font-weight:bold; cursor:pointer; margin-top:10px;">'
-            'Acceder a Internet Banking BHD'
-            '</button></a>', 
-            unsafe_allow_html=True
-        )
-
-    with tab2:
-        st.write("### 📂 Gestión de Clientes y Proyectos Históricos")
-        subtab_crear, subtab_ver = st.tabs(["🆕 Registrar / Editar Cliente", "📊 Historial Transaccional"])
-        
-        with subtab_crear:
-            with st.form("form_cliente"):
-                c_id = st.text_input("ID Cliente (Ej: CLI-001)", value=f"CLI-{uuid.uuid4().hex[:6].upper()}")
-                c_nombre = st.text_input("Nombre de la Empresa o Cliente")
-                c_rnc = st.text_input("RNC / Cédula")
-                c_direccion = st.text_area("Dirección Completa de Facturación")
-                
-                submit_cli = st.form_submit_button("💾 Guardar Cliente")
-                if submit_cli:
-                    if c_nombre and c_id:
-                        if c_id not in clientes_data:
-                            clientes_data[c_id] = {"nombre": c_nombre, "rnc": c_rnc, "direccion": c_direccion, "historico": []}
-                        else:
-                            clientes_data[c_id]["nombre"] = c_nombre
-                            clientes_data[c_id]["rnc"] = c_rnc
-                            clientes_data[c_id]["direccion"] = c_direccion
-                        guardar_clientes(clientes_data)
-                        st.success(f"Cliente {c_nombre} resguardado con éxito.")
-                        st.rerun()
-                    else:
-                        st.error("El campo ID y Nombre son obligatorios.")
-
-        with subtab_ver:
-            if not clientes_data:
-                st.info("No hay clientes registrados en el maestro local.")
+def migrar_sin_perdidas():
+    log_mig = []
+    for base_vieja in BASES_VIEJAS:
+        p_vieja = Path(base_vieja)
+        if p_vieja.exists():
+            if (p_vieja / "clientes_db").exists():
+                origen = p_vieja / "clientes_db"
             else:
-                cliente_sel = st.selectbox("Seleccione un Cliente para inspección forense:", list(clientes_data.keys()), format_func=lambda x: f"{x} - {clientes_data[x]['nombre']}")
-                
-                cli_info = clientes_data[cliente_sel]
-                st.markdown(f"**🏢 Razón Social:** {cli_info['nombre']} | **🆔 RNC:** {cli_info['rnc']}")
-                st.markdown(f"**📍 Dirección:** {cli_info['direccion']}")
-                
-                st.markdown("---")
-                st.write("#### 📜 Historial Forense y de Proyectos")
-                
-                with st.expander("➕ Registrar Evento o Auditoría en Historial"):
-                    with st.form("form_evento"):
-                        evt_tipo = st.selectbox("Tipo de Evento", ["Envío e-CF", "Auditoría Forense", "Certificación Fiscal", "Sincronización"])
-                        evt_desc = st.text_area("Descripción de los hallazgos o estado")
-                        submit_evt = st.form_submit_button("📝 Anexar al Histórico")
-                        if submit_evt:
-                            nuevo_evento = {
-                                "id_log": str(uuid.uuid4())[:8].upper(),
-                                "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                                "tipo": evt_tipo,
-                                "descripcion": evt_desc
-                            }
-                            clientes_data[cliente_sel]["historico"].append(nuevo_evento)
-                            guardar_clientes(clientes_data)
-                            st.success("Registro forense indexado correctamente.")
-                            st.rerun()
+                origen = p_vieja
+            for cli_dir in origen.iterdir():
+                if cli_dir.is_dir() and cli_dir.name.startswith("CLI-"):
+                    destino = CASOS_DIR / cli_dir.name
+                    if not destino.exists():
+                        shutil.copytree(str(cli_dir), str(destino), dirs_exist_ok=True)
+                        backup_dest = BACKUP_DIR / cli_dir.name
+                        if not backup_dest.exists():
+                            shutil.copytree(str(cli_dir), str(backup_dest), dirs_exist_ok=True)
+                        log_mig.append(f"MIGRADO {cli_dir.name} de {base_vieja} a v71 PROFESIONAL - Full sin perdidas")
+                    else:
+                        for archivo in ["info.json", "logo.png"]:
+                            src_file = cli_dir / archivo
+                            dst_file = destino / archivo
+                            if src_file.exists() and not dst_file.exists():
+                                shutil.copy2(str(src_file), str(dst_file))
+                                log_mig.append(f"SALVAGUARDADO {archivo} de {cli_dir.name}")
+                        src_cert_dir = cli_dir / "certificados"
+                        dst_cert_dir = destino / "certificados"
+                        dst_cert_dir.mkdir(exist_ok=True)
+                        if src_cert_dir.exists():
+                            for cert_file in src_cert_dir.iterdir():
+                                if cert_file.is_file() and cert_file.name not in [f.name for f in dst_cert_dir.iterdir()]:
+                                    shutil.copy2(str(cert_file), str(dst_cert_dir / cert_file.name))
+                                    log_mig.append(f"SALVAGUARDADO cert {cert_file.name}")
+    return log_mig
 
-                if cli_info["historico"]:
-                    df_hist = pd.DataFrame(cli_info["historico"])
-                    st.dataframe(df_hist, use_container_width=True)
-                else:
-                    st.warning("Este cliente no cuenta con trazas históricas registradas.")
+def get_db_path(cid):
+    cf = CASOS_DIR / cid
+    cf.mkdir(exist_ok=True, parents=True)
+    (cf / "certificados").mkdir(exist_ok=True, parents=True)
+    return cf / f"BASA_{cid}_eCF.db"
 
-    with tab3:
-        st.write("### 🔧 Datos Generales de la Empresa")
-        with st.form("form_empresa"):
-            emp_nombre_t = st.text_input("Nombre de Fantasía o Auditor", value=empresa_data.get("nombre", ""))
-            emp_razon_t = st.text_input("Razón Social Corporativa", value=empresa_data.get("empresa", ""))
-            emp_rnc_t = st.text_input("RNC Institucional", value=empresa_data.get("rnc", ""))
-            emp_tel_t = st.text_input("Teléfono Comercial", value=empresa_data.get("telefono", ""))
-            emp_dir_t = st.text_area("Dirección General", value=empresa_data.get("direccion", ""))
-            
-            uploaded_file = st.file_uploader("Subir Logotipo Corporativo (PNG/JPG)", type=["png", "jpg", "jpeg"])
-            
-            submit_emp = st.form_submit_button("⚡ Actualizar Parámetros de Interfaz")
-            if submit_emp:
-                empresa_data["nombre"] = emp_nombre_t
-                empresa_data["empresa"] = emp_razon_t
-                empresa_data["rnc"] = emp_rnc_t
-                empresa_data["telefono"] = emp_tel_t
-                empresa_data["direccion"] = emp_dir_t
-                
+def init_db_v71(cid):
+    dbp = get_db_path(cid)
+    conn = sqlite3.connect(str(dbp))
+    c = conn.cursor()
+    c.execute("CREATE TABLE IF NOT EXISTS facturas (id INTEGER PRIMARY KEY, ncf TEXT UNIQUE, tipo TEXT, cliente TEXT, rnc_cliente TEXT, descripcion TEXT, cantidad REAL, precio REAL, itbis REAL, descuento REAL, total REAL, fecha TEXT, vencimiento TEXT, estado TEXT, codigo_seg TEXT, firma_digital TEXT, precio_id TEXT, forma_pago TEXT, observaciones TEXT, xml_generado TEXT, trackid TEXT, estado_dgii TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS clientes_info (id TEXT PRIMARY KEY, nombre TEXT, rnc TEXT, email TEXT, direccion TEXT, telefono TEXT, precio_base REAL, logo_path TEXT, web TEXT, usuario_dgii TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS precios (id TEXT PRIMARY KEY, descripcion TEXT, precio REAL, cliente_id TEXT, fecha TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY, cliente_id TEXT, accion TEXT, ncf TEXT, detalle TEXT, usuario TEXT, fecha TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS dgii_config (id TEXT PRIMARY KEY, cliente_id TEXT, usuario_dgii TEXT, clave_dgii_hash TEXT, rnc_emisor TEXT, razon_social TEXT, fecha_registro TEXT, portal_url TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS certificados (id TEXT PRIMARY KEY, cliente_id TEXT, proveedor TEXT, cert_file_path TEXT, clave_cert_hash TEXT, fecha_expedicion TEXT, fecha_expiracion TEXT, estado TEXT, activo INTEGER, fecha_subida TEXT, firma_electronica TEXT, historico TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS afiliaciones (id TEXT PRIMARY KEY, usuario_master_email TEXT, empresa_principal_id TEXT, empresas_afiliadas_json TEXT, tipo TEXT, fecha_creacion TEXT, estado TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS pagos_bhd (id TEXT PRIMARY KEY, cliente_id TEXT, monto REAL, referencia_bhd TEXT, fecha_pago TEXT, comprobante_path TEXT, estado TEXT, cuenta_pago_id TEXT, liberado_por TEXT, fecha_liberacion TEXT, usuario_email TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS productos_servicios (id TEXT PRIMARY KEY, cliente_id TEXT, descripcion TEXT, precio REAL, unidad TEXT, categoria TEXT, veces_usado INTEGER, ultimo_uso TEXT, codigo TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS migracion_log (id INTEGER PRIMARY KEY, origen TEXT, destino TEXT, cliente_id TEXT, fecha TEXT, detalle TEXT, usuario TEXT)")
+    c.execute("CREATE TABLE IF NOT EXISTS cuentas_pago_admin (id TEXT PRIMARY KEY, banco TEXT, numero_cuenta TEXT, titular TEXT, tipo_cuenta TEXT, moneda TEXT, ubicacion TEXT, estado TEXT, fecha_creacion TEXT, creado_por TEXT, notas TEXT)")
+    conn.commit()
+    conn.close()
+    return dbp
+
+def get_next_ncf(cid, tipo="E31"):
+    dbp = get_db_path(cid)
+    if not dbp.exists(): 
+        init_db_v71(cid)
+    conn = sqlite3.connect(str(dbp))
+    c = conn.cursor()
+    try:
+        c.execute("SELECT ncf FROM facturas WHERE tipo=? ORDER BY id DESC LIMIT 1", (tipo,))
+        row = c.fetchone()
+        nxt = int(row[0][3:]) + 1 if row and len(row[0]) > 3 and row[0][3:].isdigit() else 1
+    except: 
+        nxt = 1
+    conn.close()
+    return f"{tipo}{nxt:010d}"
+
+def add_historico(cid, accion, ncf, detalle, usuario):
+    dbp = get_db_path(cid)
+    conn = sqlite3.connect(str(dbp))
+    c = conn.cursor()
+    c.execute("INSERT INTO historico (cliente_id, accion, ncf, detalle, usuario, fecha) VALUES (?,?,?,?,?,?)",
+              (cid, accion, ncf, detalle, usuario, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
+    conn.commit()
+    conn.close()
+
+def save_logo(cid, uploaded_file):
+    cf = CASOS_DIR / cid
+    logo_path = cf / "logo.png"
+    with open(logo_path, "wb") as f: 
+        f.write(uploaded_file.getbuffer())
+    return str(logo_path)
+
+def save_cert(cid, uploaded_file, proveedor):
+    cf = CASOS_DIR / cid / "certificados"
+    cert_name = f"cert_{proveedor}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.p12"
+    cert_path = cf / cert_name
+    with open(cert_path, "wb") as f: 
+        f.write(uploaded_file.getbuffer())
+    return str(cert_path)
+
+def save_comprobante_bhd(cid, uploaded_file):
+    cf = CASOS_DIR / cid
+    comp_name = f"comprobante_pago_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    comp_path = cf / comp_name
+    with open(comp_path, "wb") as f: 
+        f.write(uploaded_file.getbuffer())
+    return str(comp_path)
+
+def autoguardar_producto(cid, descripcion, precio, unidad="CAJ"):
+    dbp = get_db_path(cid)
+    conn = sqlite3.connect(str(dbp))
+    c = conn.cursor()
+    c.execute("SELECT id FROM productos_servicios WHERE cliente_id=? AND descripcion=?", (cid, descripcion))
+    row = c.fetchone()
+    
+    ahora = datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+    if row:
+        c.execute("UPDATE productos_servicios SET veces_usado=veces_usado+1, ultimo_uso=?, precio=? WHERE id=?", 
+                  (ahora, precio, row[0]))
+    else:
+        pid = f"PROD-{str(uuid.uuid4())[:6].upper()}"
+        c.execute("INSERT INTO productos_servicios (id, cliente_id, descripcion, precio, unidad, veces_usado, ultimo_uso) VALUES (?,?,?,?,?,?,?)", 
+                  (pid, cid, descripcion, precio, unidad, 1, ahora))
+    conn.commit()
+    conn.close()
