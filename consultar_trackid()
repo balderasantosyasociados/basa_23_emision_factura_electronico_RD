@@ -1,0 +1,18 @@
+
+    def consultar_trackid(self, track_id: str):
+        if not track_id:
+            raise DGIIError("TrackID requerido")
+
+        url = (
+            f"{self.base}/consultarresultado/"
+            "api/consultas/estado"
+        )
+
+        response = self._request(
+            "GET",
+            url,
+            params={"trackid": track_id},
+            headers=self._auth_headers()
+        )
+
+        return response.json()
