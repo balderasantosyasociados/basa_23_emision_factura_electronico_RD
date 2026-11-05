@@ -1,3 +1,37 @@
+# BASA - AUTONOMÍA REQUISITOS - Verifica solo, no tumba la app
+import importlib.util
+
+def verificar_requisitos_basa():
+    requisitos = {
+        "streamlit": "Frontend Web",
+        "pandas": "Datos",
+        "openpyxl": "Excel DGII formato azul",
+        "xlsxwriter": "Excel fallback",
+        "numpy": "Cálculo",
+        "SQLAlchemy": "Base de Datos",
+        "fastapi": "API",
+        "requests": "Conectividad",
+        "cryptography": "Firma Electrónica",
+        "lxml": "XML DGII",
+        "signxml": "Firma XML",
+    }
+    faltantes = []
+    instalados = []
+    for modulo, uso in requisitos.items():
+        # Buscar modulo, sin importar si es mayuscula o minuscula
+        nombre_buscar = modulo.lower() if modulo not in ["SQLAlchemy"] else "sqlalchemy"
+        if importlib.util.find_spec(nombre_buscar) is not None:
+            instalados.append(modulo)
+        else:
+            faltantes.append(f"{modulo} - {uso}")
+    return instalados, faltantes
+
+instalados_basa, faltantes_basa = verificar_requisitos_basa()
+if faltantes_basa:
+    st.warning(f"⚠️ Autonomía BASA: Faltan {len(faltantes_basa)} requisitos en requirements.txt: {', '.join(faltantes_basa)}. Agregalos y haz Reboot. La app sigue funcionando con lo que tiene.")
+else:
+    st.success(f"✅ Autonomía BASA: Todos los {len(instalados_basa)} requisitos instalados. Sistema FULL.")
+
 # BASA SUPERSISTEMA V27 FINAL CORREGIDO - NO SE CAE POR openpyxl - Fix ModuleNotFoundError Linea 7
 # Si openpyxl no esta instalado, usa pandas y sigue funcionando
 import streamlit as st
