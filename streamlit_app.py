@@ -1,39 +1,81 @@
-# BASA - AUTONOMÍA REQUISITOS - Verifica solo, no tumba la app
+# BASA SUPERSISTEMA V27 - FIX NameError Linea 31 - Autonomia Corregida
+import streamlit as st
 import importlib.util
+import sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from email.mime.text import MIMEText
+import urllib.parse
+from io import BytesIO
+
+# FIX openpyxl - Import seguro, no tumba la app
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    TIENE_OPENPYXL = True
+except ModuleNotFoundError:
+    openpyxl = None
+    Font = None
+    PatternFill = None
+    get_column_letter = None
+    TIENE_OPENPYXL = False
+except ImportError:
+    openpyxl = None
+    TIENE_OPENPYXL = False
+
+st.set_page_config(page_title="BASA SUPERSISTEMA V27", layout="wide", page_icon="🏦")
+
+# =========================================================
+# AUTONOMÍA BASA - FIX NameError - Variables definidas ANTES de usarlas
+# =========================================================
+# Paso 1: Definir variables vacias ANTES de todo - Asi nunca da NameError
+instalados_basa = []
+faltantes_basa = []
 
 def verificar_requisitos_basa():
+    # Esta funcion SIEMPRE devuelve 2 listas, nunca falla
     requisitos = {
         "streamlit": "Frontend Web",
         "pandas": "Datos",
         "openpyxl": "Excel DGII formato azul",
         "xlsxwriter": "Excel fallback",
         "numpy": "Cálculo",
-        "SQLAlchemy": "Base de Datos",
+        "sqlalchemy": "Base de Datos",
         "fastapi": "API",
         "requests": "Conectividad",
         "cryptography": "Firma Electrónica",
         "lxml": "XML DGII",
         "signxml": "Firma XML",
     }
-    faltantes = []
     instalados = []
+    faltantes = []
     for modulo, uso in requisitos.items():
-        # Buscar modulo, sin importar si es mayuscula o minuscula
-        nombre_buscar = modulo.lower() if modulo not in ["SQLAlchemy"] else "sqlalchemy"
-        if importlib.util.find_spec(nombre_buscar) is not None:
-            instalados.append(modulo)
-        else:
+        try:
+            if importlib.util.find_spec(modulo) is not None:
+                instalados.append(modulo)
+            else:
+                faltantes.append(f"{modulo} - {uso}")
+        except Exception:
             faltantes.append(f"{modulo} - {uso}")
     return instalados, faltantes
 
-instalados_basa, faltantes_basa = verificar_requisitos_basa()
+# Paso 2: Llamar a la funcion y GUARDAR en las variables - ANTES de usar st.warning
+try:
+    instalados_basa, faltantes_basa = verificar_requisitos_basa()
+except Exception:
+    # Si algo falla, dejar vacio pero NO tumbar la app
+    instalados_basa = []
+    faltantes_basa = []
+
+# Paso 3: AHORA SI se puede usar faltantes_basa, porque ya existe
 if faltantes_basa:
-    st.warning(f"⚠️ Autonomía BASA: Faltan {len(faltantes_basa)} requisitos en requirements.txt: {', '.join(faltantes_basa)}. Agregalos y haz Reboot. La app sigue funcionando con lo que tiene.")
+    st.warning(f"⚠️ Autonomía BASA: Faltan {len(faltantes_basa)} requisitos: {', '.join(faltantes_basa)}. Agregalos a requirements.txt y haz Reboot. La app sigue funcionando.")
 else:
     st.success(f"✅ Autonomía BASA: Todos los {len(instalados_basa)} requisitos instalados. Sistema FULL.")
 
-# BASA SUPERSISTEMA V27 FINAL CORREGIDO - NO SE CAE POR openpyxl - Fix ModuleNotFoundError Linea 7
-# Si openpyxl no esta instalado, usa pandas y sigue funcionando
+# A partir de aqui sigue tu codigo normal...
+# BASE = Path("BASA_V27_SUPERSISTEMA") ...# Si openpyxl no esta instalado, usa pandas y sigue funcionando
 import streamlit as st
 import sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
 from datetime import date, datetime, timedelta
