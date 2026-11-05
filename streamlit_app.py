@@ -17,32 +17,84 @@ def asegurar_dependencias():
         "fastapi": "fastapi>=0.115.0",
         "cryptography": "cryptography>=43.0.0",
         "lxml": "lxml>=5.3.0",
-        "signxml": "signxml>=4.0.0",
-        "PIL": "Pillow>=10.0.0",
-    }
-
-    for modulo, paquete in paquetes.items():
-
-        if importlib.util.find_spec(modulo) is None:
-
-            print(f"⚠️ Falta {modulo}. Instalando...")
-
-            subprocess.check_call(
-                [
-                    sys.executable,
-                    "-m",
-                    "pip",
-                    "install",
-                    "--upgrade",
-                    paquete,
-                ]
-            )
-
-
-asegurar_dependencias()
-
-# BASA SUPERSISTEMA V27 - FIX NameError Linea 31 - Autonomia Corregida
+# BASA SUPERSISTEMA V27 - FIX FINAL subprocess.CalledProcessError - NO usar pip install dentro de la app
 import streamlit as st
+import importlib.util
+import sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
+from datetime import date, datetime, timedelta
+from pathlib import Path
+from email.mime.text import MIMEText
+import urllib.parse
+from io import BytesIO
+
+# FIX openpyxl - Import seguro, NO tumba la app si falta
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    TIENE_OPENPYXL = True
+except ModuleNotFoundError:
+    openpyxl = None
+    Font = None
+    PatternFill = None
+    get_column_letter = None
+    TIENE_OPENPYXL = False
+except ImportError:
+    openpyxl = None
+    TIENE_OPENPYXL = False
+
+st.set_page_config(page_title="BASA SUPERSISTEMA V27", layout="wide", page_icon="🏦")
+
+# =========================================================
+# AUTONOMÍA BASA - SOLO VERIFICA, NUNCA INSTALA CON pip
+# NO usar subprocess, NO usar pip install dentro de la app
+# Streamlit Cloud solo instala desde requirements.txt
+# =========================================================
+instalados_basa = []
+faltantes_basa = []
+
+def verificar_requisitos_basa():
+    # Solo verifica, nunca instala - Asi nunca da CalledProcessError
+    requisitos = {
+        "streamlit": "Frontend Web",
+        "pandas": "Datos",
+        "openpyxl": "Excel DGII formato azul",
+        "xlsxwriter": "Excel fallback",
+        "numpy": "Cálculo",
+        "sqlalchemy": "Base de Datos",
+        "fastapi": "API",
+        "requests": "Conectividad",
+        "cryptography": "Firma Electrónica",
+        "lxml": "XML DGII",
+        "signxml": "Firma XML",
+    }
+    instalados = []
+    faltantes = []
+    for modulo, uso in requisitos.items():
+        try:
+            if importlib.util.find_spec(modulo) is not None:
+                instalados.append(modulo)
+            else:
+                faltantes.append(f"{modulo} - {uso}")
+        except Exception:
+            faltantes.append(f"{modulo} - {uso}")
+    return instalados, faltantes
+
+try:
+    instalados_basa, faltantes_basa = verificar_requisitos_basa()
+except Exception:
+    instalados_basa = []
+    faltantes_basa = []
+
+# Mostrar aviso, pero NUNCA tumbar la app
+if faltantes_basa:
+    st.warning(f"⚠️ Autonomía BASA: Faltan {len(faltantes_basa)} requisitos: {', '.join(faltantes_basa)}. Agregalos a requirements.txt y haz Clear cache + Reboot. La app sigue funcionando.")
+else:
+    st.success(f"✅ Autonomía BASA: Todos los {len(instalados_basa)} requisitos instalados. Sistema FULL.")
+
+# A partir de aqui sigue tu codigo normal...
+# BASE = Path("BASA_V27_SUPERSISTEMA") ...
+
 import importlib.util
 import sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
 from datetime import date, datetime, timedelta
