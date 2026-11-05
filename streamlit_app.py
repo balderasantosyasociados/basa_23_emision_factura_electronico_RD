@@ -624,7 +624,9 @@ elif menu == "🔍 MÓDULO: Consultas e-CF Emitidos/Recibidos":
                         if st.button(f"📤 Enviar XML al Comprador {r['eNCF']}", key=f"env{r['eNCF']}"): st.success("¿Desea enviar el comprobante al comprador? Aceptar → XML enviado vía Servicio Recepción e-CF. Solo si comprador es Emisor Electrónico activo en Directorio.")
                     else: st.caption("Enviar XML solo si Aceptado / Aceptado Condicional")
 
-opciones += ["🔀 MODULO 2DA OPCION: Facturacion DUAL BASA / DGII - 100/100", "🔄 Sincronizar BASA <-> DGII", "✅ Validador 100/100 DUAL"]
+opciones=["📊 Dashboard","🧾 Facturacion Rapida","🛒 Compras 606","📤 Ventas 607","📄 DGII 606 - Excel","⚙️ Configuracion / Mi Perfil"]
+if es_admin: opciones.append("✅ BASA Admin - Aprobar Clientes")
+opciones+=["🆕 FUSION: Facturador Gratuito - Portal FG","📜 Firma Digital - Subir o Gestionar","🔢 Solicitar e-NCF / Secuencias","🧾 Emitir e-CF FULL - Todos los Campos","🔍 Consultas e-CF","🧾 RI - Representacion Impresa","💳 Pagar Afiliacion - Cliente Paga Aqui","🛍️ Cartera de Servicios - Editable AUTOSAVE","📜 Historial Completo","🧑‍💻 Modulo Desarrolladores - API / Validar / Auditar","🔌 Conexiones Ocultas - Solo BASA"]
 # ==============================================================================
 # 🔀 MODULO ADICIONAL 2DA OPCION - DUAL BASA / DGII - AMBOS 100/100 Y SE COMPLEMENTAN
 # Regla: 1 solo e-NCF, 1 solo XML, 1 solo RI, 2 vias de entrada, 1 solo historial
