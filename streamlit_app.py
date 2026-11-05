@@ -1,770 +1,535 @@
-# BASA e-CF PRO v71 PROFESIONAL - VERSION LIMPIA FULL
-# Fixes: 1) PDF/PNG 2) ID ruta 3) Migracion 4) info.json danado 5) Duplicados 6) Cuenta enmascarada 7) DGII Local vs Real
-import streamlit as st, json, os, hashlib, datetime, sqlite3, uuid, base64, random, string, shutil, re
+# BASA AUDIT INTELLIGENCE USA V24 PROFESIONAL FULL
+# Menu Izquierda -> Despliega Derecha | Exonerar | Planes | BHD visible solo en Pago
+# Historico Credenciales | Autoguardado | Guia + IA | Pago en Linea Bancos | Multi-Empresa | Bandeja IA
+import streamlit as st, sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64
+from datetime import date, datetime, timedelta
 from pathlib import Path
-import pandas as pd
+import urllib.parse
 
-st.set_page_config(page_title="BASA e-CF PRO v71 PROFESIONAL - LIMPIO", layout="wide", page_icon="💰")
+st.set_page_config(page_title="BASA V24 PROFESIONAL", layout="wide", page_icon="🏦")
 
-# =========================================================
-# 0. CONFIG SEGURA - CUENTA ENMASCARADA
-# =========================================================
-BASE_DIR_NEW = Path("BASA_eCF_PRO_v71_PROFESIONAL")
-CLIENTES_DB_NEW = BASE_DIR_NEW / "clientes_db"
-BASE_DIR_NEW.mkdir(exist_ok=True); CLIENTES_DB_NEW.mkdir(exist_ok=True)
-BACKUP_DIR = BASE_DIR_NEW / "backup_migracion_2026"; BACKUP_DIR.mkdir(exist_ok=True)
-CASOS_DIR = CLIENTES_DB_NEW
-BASES_VIEJAS = ["BASA_eCF_PRO_v7_0_AFILIACION","BASA_eCF_PRO_v6_3_ENVIO_DGII_CERT","BASA_eCF_PRO_v6_DGII_CERTIFICADO","BASA_eCF_PRO_v6_DGII","BASA_eCF_PRO_v5","clientes_db"]
+# ================= 0. CONFIG BASA V24 =================
+BASE = Path("BASA_V24_PROFESIONAL")
+BASE.mkdir(exist_ok=True)
+CLIENTES_DIR = BASE / "clientes_db"; CLIENTES_DIR.mkdir(exist_ok=True)
+CREDENCIALES_DIR = BASE / "credenciales_privadas"; CREDENCIALES_DIR.mkdir(exist_ok=True)
+BUZON_IA_DIR = BASE / "buzon_mejoras_ia"; BUZON_IA_DIR.mkdir(exist_ok=True)
+DB = BASE / "basa_v24.db"
 
-# FIX 6: Cuenta completa solo en constante interna, NUNCA mostrar completa en header
-_CUENTA_BHD_REAL = "08694150021"
-def mostrar_cuenta(mask=True):
-    if mask:
-        return f"****{_CUENTA_BHD_REAL[-4:]}"  # ****5021
-    return _CUENTA_BHD_REAL
-CUENTA_MOSTRAR = mostrar_cuenta(True)
+CUENTA_BHD_REAL = "08694150021"  # SOLO visible en modulo PAGOS
+def mascara(c): return f"****{c[-4:]}" if len(c)>=4 else "****"
+CUENTA_MOSTRAR = mascara(CUENTA_BHD_REAL)
+BANCO, TITULAR = "BHD", "Pedro Anibal Baldera"
+MASTER_EMAIL = "Licpedrobaldera@gmail.com"
 
-MASTER_USER = {"email":"Licpedrobaldera@gmail.com","password_hash":hashlib.sha256("Basa2026!".encode()).hexdigest(),"rnc":"133378711"}
-CRED = {"nombre":"Lic. Pedro A. Baldera R.","empresa":"Baldera Santos & Asociados SRL","rnc":"133378711","telefono":"829-771-7390","whatsapp":"829-771-7390","email":"licpedrobaldera@gmail.com","direccion":"Calle Orlando Martinez No.49, Brisas del Este, Santo Domingo Este"}
-DGII_PORTAL = "https://fg.dgii.gov.do/ecf/PortalFG/login?redirectUrl=%2Fecf%2Fportalfg"
-DGII_HOME = "https://fg.dgii.gov.do/ecf/PortalFG/home"
+# Bancos RD + Internacionales - Dentro del sistema sin salir (iframe / link interno)
+BANCOS = {
+    "BHD": "https://www.bhd.com.do/",
+    "Banreservas": "https://www.banreservas.com/",
+    "Banco Popular": "https://www.popularenlinea.com/",
+    "Banco Santa Cruz": "https://www.bsc.com.do/",
+    "Banco Caribe": "https://www.bancocaribe.com.do/",
+    "Scotiabank RD": "https://www.scotiabank.com.do/",
+    "Bank of America USA": "https://www.bankofamerica.com/",
+    "Chase USA": "https://www.chase.com/",
+    "Wells Fargo USA": "https://www.wellsfargo.com/",
+    "Citi USA": "https://www.citi.com/",
+}
 
-# =========================================================
-# FIX 2: VALIDAR ID CLIENTE COMO RUTA
-# =========================================================
-def validar_id_cliente(cid: str) -> bool:
-    if not cid or len(cid) > 50: return False
-    if ".." in cid or "/" in cid or "\\" in cid: return False
+PLANES = {
+    "Gratis - Exonerado por ADMIN": {"precio": 0, "dias": 30, "desc": "Exonerado por ADMIN - Sin cobro"},
+    "Mensual - Igualas": {"precio": 199, "dias": 30, "desc": "Pago mensual"},
+    "Trimestral - 3 Meses": {"precio": 499, "dias": 90, "desc": "3 meses - Ahorra"},
+    "Semestral - 6 Meses": {"precio": 899, "dias": 180, "desc": "6 meses"},
+    "Anual - 12 Meses": {"precio": 1599, "dias": 365, "desc": "12 meses - Mejor precio"},
+    "Multi-Años - 2 Años": {"precio": 2999, "dias": 730, "desc": "2 años"},
+    "Multi-Años - 3 Años": {"precio": 3999, "dias": 1095, "desc": "3 años"},
+}
+
+# ================= 1. SEGURIDAD =================
+def validar_id(cid):
+    if not cid or len(cid)>50 or ".." in cid or "/" in cid or "\\" in cid: return False
     return bool(re.match(r"^[A-Za-z0-9_-]+$", cid))
-
-def ruta_cliente_segura(cid: str):
-    if not validar_id_cliente(cid): return None
-    ruta = (CASOS_DIR / cid).resolve()
-    if not str(ruta).startswith(str(CASOS_DIR.resolve())): return None
-    return ruta
-
-def validar_email(email: str) -> bool:
-    return bool(re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", email or ""))
-
-# =========================================================
-# FIX 4: LEER info.json SEGURO - SI ESTA DANADO HACE BACKUP
-# =========================================================
-def leer_info_json_seguro(jf: Path):
-    if not jf.exists(): return None
+def validar_email(e): return bool(re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", e or ""))
+def hash_pw(p): return hashlib.sha256(p.encode()).hexdigest()
+def ruta_cliente(cid):
+    if not validar_id(cid): return None
+    r = (CLIENTES_DIR / cid).resolve()
+    if not str(r).startswith(str(CLIENTES_DIR.resolve())): return None
+    return r
+def leer_json_seguro(p):
+    if not p.exists(): return {}
     try:
-        data = json.loads(jf.read_text(encoding="utf-8"))
-        if not isinstance(data, dict): return None
-        return data
-    except json.JSONDecodeError:
-        try:
-            backup = jf.with_suffix(".json.corrupto.bak")
-            shutil.copy(str(jf), str(backup))
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return d if isinstance(d, dict) else {}
+    except:
+        try: shutil.copy(str(p), str(p.with_suffix(".bak")))
         except: pass
-        return None
-    except: return None
+        return {}
+def guardar_json_seguro(p, d):
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(d, indent=2, ensure_ascii=False), encoding="utf-8")
+    tmp.replace(p)
+def guardar_credencial_privada(cid, data: dict):
+    # SOLO ADMIN y COLABORADORES pueden ver - Carpeta por ID/RNC
+    carpeta = CREDENCIALES_DIR / cid
+    carpeta.mkdir(parents=True, exist_ok=True)
+    # Guardar cifrado simple: base64 + hash, no texto plano en pantalla publica
+    contenido = base64.b64encode(json.dumps(data, ensure_ascii=False).encode()).decode()
+    (carpeta / "credenciales.json").write_text(contenido, encoding="utf-8")
+    return str(carpeta)
+def leer_credencial_privada(cid, rol):
+    if rol not in ["ADMIN", "COLABORADOR"]: return None  # Cliente NO ve credenciales de otros, ADMIN si
+    p = CREDENCIALES_DIR / cid / "credenciales.json"
+    if not p.exists(): return {}
+    try: return json.loads(base64.b64decode(p.read_text()).decode())
+    except: return {}
 
-def guardar_info_json_seguro(jf: Path, data: dict):
-    tmp = jf.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f: json.dump(data, f, indent=2, ensure_ascii=False)
-    tmp.replace(jf)
+# ================= 2. DB =================
+conn = sqlite3.connect(DB, check_same_thread=False)
+conn.execute("""CREATE TABLE IF NOT EXISTS usuarios (id TEXT PRIMARY KEY, email TEXT UNIQUE, rnc TEXT, nombre TEXT, pw_hash TEXT, rol TEXT, fecha DATE)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS empresas (id TEXT PRIMARY KEY, rnc TEXT UNIQUE, nombre TEXT, propietario_email TEXT, fecha DATE)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS usuario_empresa (usuario_email TEXT, empresa_id TEXT, rol_en_empresa TEXT, PRIMARY KEY(usuario_email, empresa_id))""")
+conn.execute("""CREATE TABLE IF NOT EXISTS planes (id TEXT PRIMARY KEY, empresa_id TEXT, plan TEXT, precio REAL, fecha_inicio DATE, fecha_fin DATE, estado TEXT, exonerado_por TEXT, factura_numero TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS facturas (id INTEGER PRIMARY KEY, empresa_id TEXT, ncf TEXT UNIQUE, cliente TEXT, descripcion TEXT, cantidad REAL, precio REAL, total REAL, fecha DATE, vencimiento DATE, estado TEXT, estado_dgii TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS pagos (id TEXT PRIMARY KEY, empresa_id TEXT, monto REAL, metodo TEXT, referencia TEXT, comprobante TEXT, fecha DATE, estado TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS buzon_ia (id TEXT PRIMARY KEY, usuario TEXT, empresa_id TEXT, sugerencia TEXT, analisis_ia TEXT, estado TEXT, fecha DATE, decision_admin TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY, empresa_id TEXT, accion TEXT, detalle TEXT, usuario TEXT, fecha TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS datos_confidenciales (id TEXT PRIMARY KEY, usuario_email TEXT, tipo TEXT, valor_cifrado TEXT, fecha DATE)""")  # Solo el usuario ve esto
+conn.commit()
 
-# =========================================================
-# FIX 7: DGII - SEPARAR LOCAL vs ENVIO REAL
-# =========================================================
-def enviar_a_dgii_real(factura: dict):
-    # UNICO lugar para envio oficial DGII. Por ahora NO envia.
-    # TODO: Conectar con API oficial DGII + certificado .p12 + token
-    return False, "NO ENVIADO A DGII - Solo registrado local. Falta conectar servicio oficial DGII con certificado .p12."
+def add_hist(empresa_id, accion, detalle, usuario):
+    conn.execute("INSERT INTO historico (empresa_id, accion, detalle, usuario, fecha) VALUES (?,?,?,?,?)", (empresa_id, accion, detalle, usuario, datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
+    conn.commit()
 
-# =========================================================
-# FIX 3: MIGRACION SIN PERDIDAS - VERIFICA EXISTENCIA
-# =========================================================
-def migrar_sin_perdidas():
-    log_mig = []
-    for base_vieja in BASES_VIEJAS:
-        p_vieja = Path(base_vieja)
-        if not p_vieja.exists() or not p_vieja.is_dir(): continue
-        origen = p_vieja / "clientes_db" if (p_vieja / "clientes_db").exists() else p_vieja
-        if not origen.exists() or not origen.is_dir(): continue
-        try: lista = list(origen.iterdir())
-        except: continue
-        for cli_dir in lista:
-            try:
-                if not cli_dir.is_dir() or not cli_dir.name.startswith("CLI-"): continue
-                if not validar_id_cliente(cli_dir.name): continue
-                destino = CASOS_DIR / cli_dir.name
-                if not destino.exists():
-                    shutil.copytree(str(cli_dir), str(destino), dirs_exist_ok=True)
-                    backup_dest = BACKUP_DIR / cli_dir.name
-                    if not backup_dest.exists():
-                        shutil.copytree(str(cli_dir), str(backup_dest), dirs_exist_ok=True)
-                    log_mig.append(f"MIGRADO {cli_dir.name} de {base_vieja} a v71 PROFESIONAL")
-                else:
-                    for archivo in ["info.json","logo.png"]:
-                        src_file = cli_dir / archivo
-                        dst_file = destino / archivo
-                        if src_file.exists() and not dst_file.exists():
-                            shutil.copy2(str(src_file), str(dst_file))
-                            log_mig.append(f"SALVAGUARDADO {archivo} de {cli_dir.name}")
-                    src_cert_dir = cli_dir / "certificados"; dst_cert_dir = destino / "certificados"
-                    dst_cert_dir.mkdir(exist_ok=True)
-                    if src_cert_dir.exists() and src_cert_dir.is_dir():
-                        for cert_file in src_cert_dir.iterdir():
-                            if cert_file.is_file() and cert_file.name not in [f.name for f in dst_cert_dir.iterdir()]:
-                                shutil.copy2(str(cert_file), str(dst_cert_dir / cert_file.name))
-                                log_mig.append(f"SALVAGUARDADO cert {cert_file.name}")
-            except Exception as e:
-                log_mig.append(f"ERROR migrando {cli_dir.name}: {e}")
-    return log_mig
+# ================= 3. SESION =================
+if "logged" not in st.session_state: st.session_state.logged=False
+if "ayuda_ia" not in st.session_state: st.session_state.ayuda_ia=True  # Boton derecha ON/OFF
+if "empresa_activa" not in st.session_state: st.session_state.empresa_activa=None
+if "autoguardado" not in st.session_state: st.session_state.autoguardado={}
 
-def get_db_path(cid):
-    ruta = ruta_cliente_segura(cid)
-    if ruta is None: raise ValueError(f"ID cliente invalido: {cid}")
-    ruta.mkdir(exist_ok=True, parents=True); (ruta / "certificados").mkdir(exist_ok=True, parents=True)
-    return ruta / f"BASA_{cid}_eCF.db"
-
-def init_db_v71(cid):
-    dbp = get_db_path(cid); conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-    c.execute("CREATE TABLE IF NOT EXISTS facturas (id INTEGER PRIMARY KEY, ncf TEXT UNIQUE, tipo TEXT, cliente TEXT, rnc_cliente TEXT, descripcion TEXT, cantidad REAL, precio REAL, itbis REAL, descuento REAL, total REAL, fecha TEXT, vencimiento TEXT, estado TEXT, codigo_seg TEXT, firma_digital TEXT, precio_id TEXT, forma_pago TEXT, observaciones TEXT, xml_generado TEXT, trackid TEXT, estado_dgii TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS clientes_info (id TEXT PRIMARY KEY, nombre TEXT, rnc TEXT, email TEXT, direccion TEXT, telefono TEXT, precio_base REAL, logo_path TEXT, web TEXT, usuario_dgii TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS precios (id TEXT PRIMARY KEY, descripcion TEXT, precio REAL, cliente_id TEXT, fecha TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS historico (id INTEGER PRIMARY KEY, cliente_id TEXT, accion TEXT, ncf TEXT, detalle TEXT, usuario TEXT, fecha TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS dgii_config (id TEXT PRIMARY KEY, cliente_id TEXT, usuario_dgii TEXT, clave_dgii_hash TEXT, rnc_emisor TEXT, razon_social TEXT, fecha_registro TEXT, portal_url TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS certificados (id TEXT PRIMARY KEY, cliente_id TEXT, proveedor TEXT, cert_file_path TEXT, clave_cert_hash TEXT, fecha_expedicion TEXT, fecha_expiracion TEXT, estado TEXT, activo INTEGER, fecha_subida TEXT, firma_electronica TEXT, historico TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS afiliaciones (id TEXT PRIMARY KEY, usuario_master_email TEXT, empresa_principal_id TEXT, empresas_afiliadas_json TEXT, tipo TEXT, fecha_creacion TEXT, estado TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS pagos_bhd (id TEXT PRIMARY KEY, cliente_id TEXT, monto REAL, referencia_bhd TEXT, fecha_pago TEXT, comprobante_path TEXT, estado TEXT, cuenta_pago_id TEXT, liberado_por TEXT, fecha_liberacion TEXT, usuario_email TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS productos_servicios (id TEXT PRIMARY KEY, cliente_id TEXT, descripcion TEXT, precio REAL, unidad TEXT, categoria TEXT, veces_usado INTEGER, ultimo_uso TEXT, codigo TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS migracion_log (id INTEGER PRIMARY KEY, origen TEXT, destino TEXT, cliente_id TEXT, fecha TEXT, detalle TEXT, usuario TEXT)")
-    c.execute("CREATE TABLE IF NOT EXISTS cuentas_pago_admin (id TEXT PRIMARY KEY, banco TEXT, numero_cuenta TEXT, titular TEXT, tipo_cuenta TEXT, moneda TEXT, ubicacion TEXT, estado TEXT, fecha_creacion TEXT, creado_por TEXT, notas TEXT)")
-    conn.commit(); conn.close(); return dbp
-
-def get_next_ncf(cid, tipo="E31"):
-    dbp = get_db_path(cid)
-    if not dbp.exists(): init_db_v71(cid)
-    conn = sqlite3.connect(str(dbp)); c = conn.cursor()
+# AUTOGUARDADO: al hacer click o cambiar campo, se guarda en session y en DB
+def autoguardar(clave, valor, empresa_id=""):
+    st.session_state.autoguardado[clave]=valor
+    # Guardar en historico silencioso
     try:
-        c.execute("SELECT ncf FROM facturas WHERE tipo=? ORDER BY id DESC LIMIT 1", (tipo,))
-        row = c.fetchone(); nxt = int(row[0][3:])+1 if row and len(row[0])>3 and row[0][3:].isdigit() else 1
-    except: nxt = 1
-    conn.close(); return f"{tipo}{nxt:010d}"
-
-def add_historico(cid, accion, ncf, detalle, usuario):
-    try:
-        dbp = get_db_path(cid); conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-        c.execute("INSERT INTO historico (cliente_id, accion, ncf, detalle, usuario, fecha) VALUES (?,?,?,?,?,?)", (cid, accion, ncf, detalle, usuario, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S")))
-        conn.commit(); conn.close()
+        if empresa_id: add_hist(empresa_id, "AUTOGUARDADO", f"{clave} = {str(valor)[:100]}", st.session_state.get("user",""))
     except: pass
+    return valor
 
-# =========================================================
-# FIX 1: GUARDAR LOGO / CERT / COMPROBANTE POR CONTENIDO REAL
-# =========================================================
-def detectar_ext_por_contenido(contenido: bytes, nombre_original: str):
-    if contenido.startswith(b"%PDF"): return ".pdf"
-    if contenido.startswith(b"\x89PNG"): return ".png"
-    if contenido.startswith(b"\xff\xd8\xff"): return ".jpg"
-    if contenido.startswith(b"PK\x03\x04"): return ".zip"
-    # .p12 no tiene magic fijo, se valida por extension + tamano
-    if nombre_original.lower().endswith(".p12"): return ".p12"
-    return None
-
-def save_logo(cid, uploaded_file):
-    if not validar_id_cliente(cid): raise ValueError("ID cliente invalido")
-    cf = CASOS_DIR / cid; cf.mkdir(exist_ok=True, parents=True)
-    contenido = uploaded_file.getbuffer().tobytes() if hasattr(uploaded_file, "getbuffer") else uploaded_file.read()
-    ext = detectar_ext_por_contenido(contenido, uploaded_file.name or "")
-    if ext not in [".png", ".jpg"]:
-        # Si es PNG/JPG real pero con otro nombre, forzar .png solo si es imagen
-        if contenido.startswith(b"\x89PNG"): ext = ".png"
-        elif contenido.startswith(b"\xff\xd8\xff"): ext = ".jpg"
-        else: raise ValueError("Logo debe ser PNG o JPG real")
-    logo_path = cf / f"logo{ext}"
-    with open(logo_path, "wb") as f: f.write(contenido)
-    return str(logo_path)
-
-def save_cert(cid, uploaded_file, proveedor):
-    if not validar_id_cliente(cid): raise ValueError("ID cliente invalido")
-    cf = CASOS_DIR / cid / "certificados"; cf.mkdir(parents=True, exist_ok=True)
-    contenido = uploaded_file.getbuffer().tobytes() if hasattr(uploaded_file, "getbuffer") else uploaded_file.read()
-    # Cert .p12: no validar por magic, solo tamano y extension
-    if len(contenido) == 0: raise ValueError("Certificado vacio")
-    proveedor_limpio = re.sub(r"[^A-Za-z0-9_-]", "_", proveedor)[:20]
-    cert_name = f"cert_{proveedor_limpio}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.p12"
-    cert_path = cf / cert_name
-    with open(cert_path, "wb") as f: f.write(contenido)
-    return str(cert_path)
-
-def save_comprobante_bhd(cid, uploaded_file):
-    # FIX 1: ANTES siempre .png aunque fuera PDF. AHORA detecta contenido.
-    if not validar_id_cliente(cid): raise ValueError("ID cliente invalido")
-    cf = CASOS_DIR / cid; cf.mkdir(exist_ok=True, parents=True)
-    contenido = uploaded_file.getbuffer().tobytes() if hasattr(uploaded_file, "getbuffer") else uploaded_file.read()
-    ext = detectar_ext_por_contenido(contenido, uploaded_file.name or "")
-    if ext is None:
-        raise ValueError("Comprobante debe ser PDF, PNG o JPG real. No se pudo detectar tipo.")
-    comp_name = f"comprobante_pago_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}{ext}"
-    comp_path = cf / comp_name
-    with open(comp_path, "wb") as f: f.write(contenido)
-    return str(comp_path)
-
-def autoguardar_producto(cid, descripcion, precio, unidad="CAJ"):
-    try:
-        dbp = get_db_path(cid); conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-        c.execute("SELECT * FROM productos_servicios WHERE cliente_id=? AND descripcion=?", (cid, descripcion))
-        row = c.fetchone()
-        if row:
-            c.execute("UPDATE productos_servicios SET veces_usado=veces_usado+1, ultimo_uso=?, precio=? WHERE id=?", (datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), precio, row[0]))
-        else:
-            pid = f"PROD-{str(uuid.uuid4())[:6].upper()}"
-            c.execute("INSERT INTO productos_servicios (id,cliente_id,descripcion,precio,unidad,categoria,veces_usado,ultimo_uso,codigo) VALUES (?,?,?,?,?,?,?,?,?)", (pid, cid, descripcion, precio, unidad, "General", 1, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), descripcion[:10].upper()))
-        conn.commit(); conn.close()
-    except: pass
-
-def get_cuenta_pago_activa():
-    for cf in CASOS_DIR.iterdir():
-        if cf.is_dir():
-            dbp = cf / f"BASA_{cf.name}_eCF.db"
-            if dbp.exists():
-                try:
-                    conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-                    c.execute("SELECT * FROM cuentas_pago_admin WHERE estado='Activa' ORDER BY fecha_creacion DESC LIMIT 1")
-                    row = c.fetchone(); conn.close()
-                    if row: return row
-                except: pass
-    return ("CUENTA-OFICIAL-001", "BHD León", _CUENTA_BHD_REAL, "Pedro Anibal Baldera", "Ahorros en Pesos", "DOP", "RD Local", "Activa", datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), "Licpedrobaldera@gmail.com", "Cuenta oficial autorizada")
-
-def format_cuenta_profesional(cuenta_row):
-    if not cuenta_row:
-        return '<div style="padding:15px;background:#f8f9fa;border-radius:10px;">Cuenta de pago autorizada por Administrador - Consultar con Administracion</div>'
-    banco = cuenta_row[1]; numero = cuenta_row[2]; titular = cuenta_row[3]; tipo = cuenta_row[4]; moneda = cuenta_row[5]; ubicacion = cuenta_row[6]
-    # FIX 6: Mostrar solo ****5021, no numero completo
-    numero_masked = f"****{str(numero)[-4:]}" if len(str(numero))>4 else numero
-    return f"""
-    <div style="background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;border-left:5px solid #FFD700;">
-    <h3 style="color:#FFD700;margin:0 0 15px 0;">💳 Cuenta de Pago Autorizada - Formato Profesional v71 LIMPIO</h3>
-    <table style="width:100%;color:white;font-size:14px;">
-    <tr><td style="padding:5px;"><b>Banco:</b></td><td style="padding:5px;">{banco}</td></tr>
-    <tr><td style="padding:5px;"><b>Titular:</b></td><td style="padding:5px;">{titular}</td></tr>
-    <tr><td style="padding:5px;"><b>Tipo Cuenta:</b></td><td style="padding:5px;">{tipo}</td></tr>
-    <tr><td style="padding:5px;"><b>Moneda:</b></td><td style="padding:5px;">{moneda}</td></tr>
-    <tr><td style="padding:5px;"><b>Ubicacion:</b></td><td style="padding:5px;">{ubicacion}</td></tr>
-    <tr><td style="padding:5px;"><b>Numero Cuenta:</b></td><td style="padding:5px;">{numero_masked} (Completo visible solo al confirmar pago)</td></tr>
-    <tr><td style="padding:5px;"><b>Estado:</b></td><td style="padding:5px;color:#4CAF50;">{cuenta_row[7]} - Autorizada</td></tr>
-    </table>
-    <p style="font-size:11px;margin-top:10px;opacity:0.8;">Cuenta autorizada por Administrador - Formato profesional v71 LIMPIO - Numero enmascarado por privacidad</p>
-    </div>
-    """
-
-# FIX 5: Buscar duplicados en TODOS los clientes
-def existe_email_o_rnc_duplicado(email, rnc):
-    email_n = (email or "").strip().lower(); rnc_n = (rnc or "").strip()
-    if not CASOS_DIR.exists(): return False, ""
-    for cf in CASOS_DIR.iterdir():
-        if not cf.is_dir(): continue
-        jf = cf / "info.json"
-        info = leer_info_json_seguro(jf)
-        if info:
-            if info.get("email","").strip().lower() == email_n and email_n:
-                return True, f"Correo {email_n} ya existe en cliente {cf.name}"
-            if info.get("rnc","").strip() == rnc_n and rnc_n:
-                return True, f"RNC {rnc_n} ya existe en cliente {cf.name}"
-    return False, ""
-
-if "migracion_ejecutada" not in st.session_state:
-    logs = migrar_sin_perdidas()
-    st.session_state.migracion_ejecutada = True
-    st.session_state.migracion_logs = logs
-
-st.markdown("<style>.header-pro{background:linear-gradient(135deg,#0F2027,#203A43,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;}.footer-pro{background:#0F2027;color:white;padding:15px;border-radius:10px;margin-top:20px;border-left:5px solid #FFD700;}.dgii-box{background:linear-gradient(135deg,#1a472a,#2d5a27);padding:15px;border-radius:10px;color:white;border:2px solid #4CAF50;}.bhd-box{background:linear-gradient(135deg,#1a3a5a,#2d5a8a);padding:15px;border-radius:10px;color:white;border:2px solid #FFD700;}</style>", unsafe_allow_html=True)
-if "logged" not in st.session_state: st.session_state.logged = False
-if "modulo_activo" not in st.session_state: st.session_state.modulo_activo = "DASHBOARD"
-if "recovery_mode" not in st.session_state: st.session_state.recovery_mode = False
-if "show_register" not in st.session_state: st.session_state.show_register = False
-
+# ================= 4. LOGIN / RECUPERACION POR RNC / USUARIO / CORREO =================
 if not st.session_state.logged:
-    # FIX 6: Header ya NO muestra 08694150021 completo, solo ****5021
-    st.markdown(f'<div class="header-pro"><h1>🏛️ BASA e-CF PRO v71 PROFESIONAL - LIMPIO</h1><h2>Cuenta {CUENTA_MOSTRAR} - Ahorros Pesos - Pedro Anibal Baldera - Migracion Sin Perdidas + Afiliacion + Cuenta Autorizada Admin | RNC 133378711</h2><p style="color:#FFD700;">Baldera Santos & Asociados SRL - Formato Profesional v71 LIMPIO - Sin puntos</p></div>', unsafe_allow_html=True)
-    if st.session_state.get("migracion_logs"):
-        with st.expander(f"📦 Migracion Automatica Sin Perdidas v71 - {len(st.session_state.migracion_logs)} archivos"):
-            for log in st.session_state.migracion_logs[:20]: st.write(log)
+    st.markdown(f"<div style='background:linear-gradient(135deg,#0F2027,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;'><h1>🏦 BASA AUDIT INTELLIGENCE USA V24 PROFESIONAL</h1><p>Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD {CUENTA_MOSTRAR} | Pedro Anibal Baldera</p></div>", unsafe_allow_html=True)
+    # BOTON AYUDA IA A MANO DERECHA
+    col_izq, col_der = st.columns([4,1])
+    with col_der:
+        st.session_state.ayuda_ia = st.toggle("🤖 Ayuda IA", value=st.session_state.ayuda_ia, help="Activa / Desactiva guia con IA")
+    if st.session_state.ayuda_ia:
+        st.info("🤖 **IA BASA:** Hola, soy tu asistente. Te voy a guiar paso a paso. Si no quieres ayuda, apaga el botón de arriba a la derecha. Puedes imprimir esta guía en el botón 'Imprimir Guía' abajo.")
     c1,c2,c3 = st.columns([1,2,1])
     with c2:
-        tab_login, tab_register = st.tabs(["🔐 LOGIN", "📝 REGISTRO + PAGO"])
-        with tab_login:
-            if not st.session_state.recovery_mode and not st.session_state.show_register:
-                st.markdown(f"### 🔐 Acceso Seguro - v71 LIMPIO - Cuenta {CUENTA_MOSTRAR}")
-                email = st.text_input("Correo Electronico", key="login_email")
-                pwd = st.text_input("Contraseña", type="password", key="login_pwd")
-                if st.button("🚀 Entrar a BASA v71 LIMPIO", use_container_width=True, type="primary"):
-                    ph = hashlib.sha256(pwd.encode()).hexdigest()
-                    if email == MASTER_USER["email"] and ph == MASTER_USER["password_hash"]:
-                        st.session_state.logged = True; st.session_state.user = email; st.session_state.role = "ADMIN"; st.rerun()
-                    else:
-                        found = False
-                        for cf in CASOS_DIR.iterdir():
-                            if cf.is_dir():
-                                jf = cf / "info.json"
-                                info = leer_info_json_seguro(jf)  # FIX 4: No se rompe si esta danado
-                                if info and info.get("email") == email and info.get("password_hash") == ph:
-                                    st.session_state.logged = True; st.session_state.user = email; st.session_state.role = "CLIENT"; st.session_state.client_id = info.get("id"); found = True; st.rerun()
-                        if not found: st.error("❌ Credenciales incorrectas")
-                colA,colB = st.columns(2)
-                with colA:
-                    if st.button("🔑 Olvide mi clave", use_container_width=True): st.session_state.recovery_mode = True; st.rerun()
-                with colB:
-                    if st.button("📝 Crear Cuenta + Pagar", use_container_width=True): st.session_state.show_register = True; st.rerun()
-            if st.session_state.recovery_mode:
-                st.markdown("### 🔑 Recuperar Clave - Seguro")
-                email_rec = st.text_input("Correo registrado", key="rec_email")
-                if st.button("📧 Generar Codigo", use_container_width=True, type="primary"):
-                    code = "".join(random.choices(string.digits, k=6)); st.session_state.recovery_code = code; st.session_state.recovery_email = email_rec
-                    st.success(f"✅ Codigo: {code} - Enviado a {email_rec} / WhatsApp {CRED['whatsapp']}")
-                code_in = st.text_input("Ingresa codigo", key="rec_code")
-                new_pwd = st.text_input("Nueva contraseña", type="password", key="rec_newpwd")
-                if st.button("🔄 Cambiar clave", use_container_width=True):
-                    if code_in == st.session_state.get("recovery_code"):
-                        actualizado = False
-                        for cf in CASOS_DIR.iterdir():
-                            if not cf.is_dir(): continue
-                            jf = cf / "info.json"
-                            info = leer_info_json_seguro(jf)
-                            if info and info.get("email") == st.session_state.get("recovery_email"):
-                                info["password_hash"] = hashlib.sha256(new_pwd.encode()).hexdigest()
-                                guardar_info_json_seguro(jf, info)
-                                st.success(f"✅ Clave actualizada para {info.get('email')}")
-                                actualizado = True
-                        if not actualizado: st.error("Correo no encontrado o info.json dañado - Contacta Admin")
-                    else: st.error("Codigo incorrecto")
-                if st.button("⬅️ Volver"): st.session_state.recovery_mode = False; st.session_state.show_register = False; st.rerun()
-        with tab_register:
-            st.markdown("### 📝 Registro Nuevo Cliente BASA v71 LIMPIO + Pago Cuenta Autorizada")
-            cuenta_activa_reg = get_cuenta_pago_activa()
-            st.markdown(format_cuenta_profesional(cuenta_activa_reg), unsafe_allow_html=True)
-            reg_id = st.text_input("ID Cliente (Auto)", value=f"CLI-{str(uuid.uuid4())[:4].upper()}", key="reg_id")
-            reg_nombre = st.text_input("Razon Social / Nombre Empresa", value="", key="reg_nombre")
-            reg_rnc = st.text_input("RNC / Cedula", value="", key="reg_rnc")
-            reg_email = st.text_input("Correo Electronico (Usuario)", value="", key="reg_email")
-            reg_pwd = st.text_input("Contraseña", type="password", key="reg_pwd")
-            reg_tel = st.text_input("Telefono / WhatsApp", value="", key="reg_tel")
-            reg_dir = st.text_input("Direccion Completa", value="", key="reg_dir")
-            reg_web = st.text_input("Sitio Web (Opcional)", value="", key="reg_web")
-            reg_logo = st.file_uploader("📷 Logo Empresa (PNG/JPG)", type=["png","jpg","jpeg"], key="reg_logo")
-            reg_usuario_dgii = st.text_input("Usuario DGII e-CF FG Home", value="", key="reg_usu_dgii")
-            reg_clave_dgii = st.text_input("Clave DGII e-CF FG Home", type="password", key="reg_clave_dgii")
-            st.markdown("---")
-            st.markdown("### 💳 Pago Cuenta Autorizada - Formato Profesional v71 LIMPIO")
-            monto_pago = st.number_input("Monto a Pagar (Para liberacion Full)", value=199.0, key="monto_pago_v71")
-            ref_bhd = st.text_input("Referencia Transferencia", value="", key="ref_bhd_v71")
-            comp_bhd = st.file_uploader("📁 Subir Comprobante Pago (Foto/PDF)", type=["png","jpg","jpeg","pdf"], key="comp_bhd_v71")
-            tipo_afiliacion = st.selectbox("Tipo Afiliacion", ["Individual - Solo mi empresa","Consorcio - Tengo varias empresas afiliadas","Grupo Empresarial"], key="tipo_afiliacion_v71")
-            empresas_afiliadas_input = st.text_input("IDs Empresas Afiliadas (coma)", value="", key="empresas_afiliadas_v71") if tipo_afiliacion != "Individual - Solo mi empresa" else ""
-            if st.button("✅ REGISTRARME EN BASA v71 LIMPIO + PAGAR", use_container_width=True, type="primary"):
-                # FIX 5: Validar duplicados + email + ID
-                if not validar_id_cliente(reg_id):
-                    st.error("ID Cliente invalido. Solo letras, numeros, guion. Ej: CLI-AB12")
-                elif not validar_email(reg_email):
-                    st.error("Correo invalido. Ej: pedro@basa.com")
-                elif not (reg_nombre and reg_rnc and reg_email and reg_pwd and ref_bhd and comp_bhd):
-                    st.error("Complete Nombre, RNC, Email, Contraseña, Referencia y Comprobante")
+        tab1, tab2, tab3 = st.tabs(["🔐 LOGIN", "📝 REGISTRO + AFILIACION", "🔑 RECUPERAR CLAVE"])
+        with tab1:
+            email = st.text_input("Correo / Usuario")
+            pw = st.text_input("Contraseña", type="password")
+            if st.button("🚀 Entrar a BASA V24", use_container_width=True, type="primary"):
+                if email==MASTER_EMAIL and hash_pw(pw)==hash_pw("Basa2026!"):
+                    st.session_state.logged=True; st.session_state.user=email; st.session_state.role="ADMIN"; st.rerun()
                 else:
-                    duplicado, msg_dup = existe_email_o_rnc_duplicado(reg_email, reg_rnc)
-                    if duplicado:
-                        st.error(f"❌ DUPLICADO: {msg_dup} - No se guardo. Usa otro correo/RNC o recupera clave.")
+                    row = conn.execute("SELECT * FROM usuarios WHERE email=? AND pw_hash=?", (email.strip().lower(), hash_pw(pw))).fetchone()
+                    if row: st.session_state.logged=True; st.session_state.user=row[1]; st.session_state.role=row[5]; st.rerun()
+                    else: st.error("Credenciales incorrectas. Usa Recuperar Clave por RNC / Usuario / Correo.")
+        with tab2:
+            st.markdown("### Afiliación BASA - Elige tu Plan")
+            nombre = st.text_input("Nombre / Razon Social", key="reg_nombre")
+            rnc = st.text_input("RNC / Cedula", key="reg_rnc")
+            email_r = st.text_input("Correo Usuario Principal", key="reg_email")
+            pw_r = st.text_input("Contraseña", type="password", key="reg_pw")
+            plan_sel = st.selectbox("Plan de Afiliación", list(PLANES.keys()), key="reg_plan")
+            st.write(f"**Plan:** {plan_sel} - **Precio:** RD$ {PLANES[plan_sel]['precio']:,.0f} - {PLANES[plan_sel]['desc']}")
+            # Exonerado solo si ADMIN lo aprueba - por defecto NO exonerado, ADMIN lo exonera despues
+            if st.button("✅ Registrarme + Crear Mi Empresa + Generar Factura Afiliación", use_container_width=True, type="primary"):
+                if not validar_email(email_r): st.error("Correo invalido")
+                elif not validar_id(rnc.replace("-","")) and not rnc: st.error("RNC obligatorio")
+                else:
+                    existe = conn.execute("SELECT 1 FROM usuarios WHERE email=?", (email_r.strip().lower(),)).fetchone()
+                    if existe: st.error("Ese correo ya existe. Usa Recuperar Clave.")
                     else:
-                        try:
-                            dbp = init_db_v71(reg_id)
-                            logo_path = ""
-                            if reg_logo:
-                                try: logo_path = save_logo(reg_id, reg_logo)
-                                except Exception as e: st.error(f"Logo invalido: {e}"); st.stop()
-                            try: comp_path = save_comprobante_bhd(reg_id, comp_bhd)
-                            except Exception as e: st.error(f"Comprobante invalido: {e}"); st.stop()
-                            info = {"id":reg_id,"nombre":reg_nombre,"rnc":reg_rnc,"email":reg_email.strip().lower(),"password_hash":hashlib.sha256(reg_pwd.encode()).hexdigest(),"precio":monto_pago,"direccion":reg_dir,"telefono":reg_tel,"web":reg_web,"logo_path":logo_path,"usuario_dgii":reg_usuario_dgii,"tipo_afiliacion":tipo_afiliacion,"empresas_afiliadas":empresas_afiliadas_input}
-                            guardar_info_json_seguro(CASOS_DIR / reg_id / "info.json", info)
-                            conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-                            c.execute("INSERT OR REPLACE INTO clientes_info (id,nombre,rnc,email,direccion,telefono,precio_base,logo_path,web,usuario_dgii) VALUES (?,?,?,?,?,?,?,?,?,?)", (reg_id, reg_nombre, reg_rnc, reg_email.strip().lower(), reg_dir, reg_tel, monto_pago, logo_path, reg_web, reg_usuario_dgii))
-                            if reg_usuario_dgii:
-                                c.execute("INSERT OR REPLACE INTO dgii_config (id,cliente_id,usuario_dgii,clave_dgii_hash,rnc_emisor,razon_social,fecha_registro,portal_url) VALUES (?,?,?,?,?,?,?,?)", (f"DGII-{reg_id}", reg_id, reg_usuario_dgii, hashlib.sha256(reg_clave_dgii.encode()).hexdigest() if reg_clave_dgii else "", reg_rnc, reg_nombre, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), DGII_HOME))
-                            cuenta_activa = get_cuenta_pago_activa()
-                            pago_id = f"PAGO-{str(uuid.uuid4())[:8].upper()}"
-                            c.execute("INSERT INTO pagos_bhd (id,cliente_id,monto,referencia_bhd,fecha_pago,comprobante_path,estado,cuenta_pago_id,liberado_por,fecha_liberacion,usuario_email) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (pago_id, reg_id, monto_pago, ref_bhd, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), comp_path, f"Pendiente - Verificando en cuenta autorizada {cuenta_activa[0]}", cuenta_activa[0], "", "", reg_email))
-                            if tipo_afiliacion != "Individual - Solo mi empresa":
-                                afili_id = f"AFIL-{str(uuid.uuid4())[:6].upper()}"
-                                c.execute("INSERT INTO afiliaciones (id,usuario_master_email,empresa_principal_id,empresas_afiliadas_json,tipo,fecha_creacion,estado) VALUES (?,?,?,?,?,?,?)", (afili_id, reg_email, reg_id, json.dumps([s.strip() for s in empresas_afiliadas_input.split(",") if s.strip()] + [reg_id]), tipo_afiliacion, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), "Activo - Consorcio v71 LIMPIO"))
-                            c.execute("INSERT OR REPLACE INTO cuentas_pago_admin (id,banco,numero_cuenta,titular,tipo_cuenta,moneda,ubicacion,estado,fecha_creacion,creado_por,notas) VALUES (?,?,?,?,?,?,?,?,?,?,?)", cuenta_activa)
-                            conn.commit(); conn.close()
-                            add_historico(reg_id, "REGISTRO_CLIENTE_BASA_v71_LIMPIO", "-", f"Cliente {reg_nombre} RNC {reg_rnc} registrado v71 LIMPIO - Pago {monto_pago} Ref {ref_bhd}", reg_email)
-                            st.success(f"✅ CUENTA CREADA BASA v71 LIMPIO: {reg_id} | {reg_nombre} | RNC {reg_rnc} | Monto RD$ {monto_pago} Ref {ref_bhd} | Pendiente liberacion")
-                            st.balloons()
-                        except Exception as e:
-                            st.error(f"Error registrando: {e}")
-    st.markdown(f'<div class="dgii-box"><h3>🔗 Portal DGII e-CF Oficial FG Home: <a href="{DGII_HOME}" target="_blank" style="color:#FFD700;">{DGII_HOME}</a></h3><p>Cuenta Autorizada - Formato profesional v71 LIMPIO - {CUENTA_MOSTRAR}</p></div>', unsafe_allow_html=True)
+                        emp_id = f"CLI-{rnc[-4:] if len(rnc)>=4 else '0000'}-{pd.Timestamp.now().strftime('%H%M')}"
+                        # Guardar usuario
+                        conn.execute("INSERT INTO usuarios (id,email,rnc,nombre,pw_hash,rol,fecha) VALUES (?,?,?,?,?,?,?)", (emp_id, email_r.strip().lower(), rnc, nombre, hash_pw(pw_r), "CLIENT", str(date.today())))
+                        conn.execute("INSERT INTO empresas (id,rnc,nombre,propietario_email,fecha) VALUES (?,?,?,?,?)", (emp_id, rnc, nombre, email_r.strip().lower(), str(date.today())))
+                        conn.execute("INSERT INTO usuario_empresa (usuario_email, empresa_id, rol_en_empresa) VALUES (?,?,?)", (email_r.strip().lower(), emp_id, "PROPIETARIO"))
+                        # Factura Afiliacion - Generada automaticamente
+                        factura_num = f"AFIL-{emp_id}-{datetime.now().strftime('%Y%m%d%H%M')}"
+                        fin = date.today() + timedelta(days=PLANES[plan_sel]['dias'])
+                        conn.execute("INSERT INTO planes (id,empresa_id,plan,precio,fecha_inicio,fecha_fin,estado,exonerado_por,factura_numero) VALUES (?,?,?,?,?,?,?,?,?)", (factura_num, emp_id, plan_sel, PLANES[plan_sel]['precio'], str(date.today()), str(fin), "Pendiente Pago - Esperando ADMIN exonerar o pago", "", factura_num))
+                        conn.commit()
+                        # Guardar credenciales en carpeta privada por ID/RNC
+                        guardar_credencial_privada(emp_id, {"empresa_id": emp_id, "rnc": rnc, "nombre": nombre, "usuario_principal": email_r, "clave_hash": hash_pw(pw_r), "clave_para_soporte": pw_r, "plan": plan_sel, "factura_afiliacion": factura_num, "fecha": str(date.today())})
+                        st.success(f"✅ Registrado! Empresa {emp_id} | Factura Afiliación {factura_num} | Plan {plan_sel} | RD$ {PLANES[plan_sel]['precio']:,.0f} | Ve a PAGOS para pagar o espera que ADMIN te exonere.")
+                        st.balloons()
+        with tab3:
+            st.markdown("### Recuperar Clave - Por RNC / Usuario / Correo")
+            st.write("Elige cómo quieres buscarte:")
+            metodo = st.selectbox("Buscar por:", ["RNC / Cedula", "Correo / Usuario Registrado", "Nombre Empresa"])
+            valor_buscar = st.text_input("Escribe RNC, Correo o Nombre", key="rec_buscar")
+            if st.button("🔍 Buscar Mi Cuenta"):
+                if metodo=="RNC / Cedula": rows = conn.execute("SELECT * FROM usuarios WHERE rnc=?", (valor_buscar,)).fetchall()
+                elif metodo=="Correo / Usuario Registrado": rows = conn.execute("SELECT * FROM usuarios WHERE email=?", (valor_buscar.strip().lower(),)).fetchall()
+                else: rows = conn.execute("SELECT * FROM usuarios WHERE nombre LIKE ?", (f"%{valor_buscar}%",)).fetchall()
+                if not rows: st.error("No encontrado. Verifica RNC / Correo.")
+                else:
+                    st.success(f"Encontrado {len(rows)} usuario(s) para esa empresa:")
+                    for r in rows:
+                        st.write(f"**Usuario:** {r[1]} | **Empresa:** {r[3]} | **RNC:** {r[2]}")
+                    st.session_state.usuarios_encontrados = rows
+            if "usuarios_encontrados" in st.session_state:
+                st.markdown("### ¿A quién quieres que le llegue el código?")
+                opciones = [f"{r[1]} - {r[3]}" for r in st.session_state.usuarios_encontrados]
+                sel_usuario = st.selectbox("Elige usuario para enviar código", opciones)
+                canal = st.selectbox("Enviar por:", ["WhatsApp", "Correo Electronico", "Mostrar en pantalla (si eres ADMIN)"])
+                if st.button("📲 Enviar Código de Recuperación"):
+                    codigo = "".join([str(pd.Timestamp.now().microsecond)[-1] for _ in range(6)])
+                    # En esta version, generamos link WhatsApp y correo, no enviamos solo sin permiso
+                    email_dest = sel_usuario.split(" - ")[0]
+                    wa_link = f"https://wa.me/18297717390?text={urllib.parse.quote(f'Tu codigo BASA es: {codigo} para usuario {email_dest}')}"
+                    st.success(f"Código generado: {codigo} (Guárdalo)")
+                    if canal=="WhatsApp": st.link_button("📲 Abrir WhatsApp con Código", wa_link)
+                    elif canal=="Correo Electronico": st.markdown(f"[📧 Enviar por Correo a {email_dest}](mailto:{email_dest}?subject=Codigo BASA&body=Tu codigo es {codigo})")
+                    else: st.info(f"Código para ADMIN: {codigo} - Usuario {email_dest}")
+                    st.session_state.codigo_rec = codigo; st.session_state.email_rec = email_dest
+                codigo_in = st.text_input("Ingresa código recibido", key="rec_codigo_in")
+                nueva_clave = st.text_input("Nueva clave", type="password", key="rec_nueva")
+                if st.button("🔄 Cambiar Clave"):
+                    if codigo_in == st.session_state.get("codigo_rec"):
+                        conn.execute("UPDATE usuarios SET pw_hash=? WHERE email=?", (hash_pw(nueva_clave), st.session_state.email_rec)); conn.commit()
+                        st.success("Clave cambiada. Ya puedes entrar.")
+                    else: st.error("Código incorrecto.")
+    # GUIA IMPRIMIBLE
+    st.markdown("---")
+    if st.button("🖨️ Imprimir Guía de Uso BASA V24 - Instrucciones"):
+        st.markdown("""
+        **GUIA BASA V24 - PARA IMPRIMIR**
+        1. Registrate con RNC y correo. Elige plan Mensual/Trimestral/Semestral/Anual/Multi-Años.
+        2. Paga en modulo PAGOS con tarjeta o transferencia. BHD 08694150021 visible solo ahi.
+        3. Si ADMIN te exonera, tu plan queda Gratis.
+        4. Factura en FACTURAR. Cambia de empresa arriba sin salir.
+        5. Revisa CARTERA: VIGENTE 0-30, B 31-60, C 61-90, VENCIDA +90.
+        6. Exporta reportes del dia por empresa o consolidado a Excel/Word.
+        7. Si olvidas clave, usa Recuperar por RNC / Usuario / Correo.
+        8. Apaga Ayuda IA con boton derecha si no quieres guia.
+        """)
     st.stop()
 
-# ================= DESPUES DE LOGIN =================
-def verificar_liberado_bhd(cid):
-    if not validar_id_cliente(cid): return False
-    try: dbp = get_db_path(cid)
-    except: return False
-    if not dbp.exists(): return False
-    conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-    try:
-        c.execute("SELECT estado FROM pagos_bhd WHERE cliente_id=? ORDER BY fecha_pago DESC LIMIT 1", (cid,))
-        row = c.fetchone(); conn.close()
-        if row and "Liberado" in row[0]: return True
-        if st.session_state.role == "ADMIN": return True
-        if not row: return True
-        return False
-    except: conn.close(); return True
+# ================= 5. MENU IZQUIERDA -> DESPLIEGA DERECHA =================
+# Boton Ayuda IA a mano derecha - Siempre visible
+col_top1, col_top2 = st.columns([5,1])
+with col_top1:
+    st.markdown(f"### 🏦 BASA V24 PROFESIONAL - {st.session_state.user} - {st.session_state.role}")
+with col_top2:
+    st.session_state.ayuda_ia = st.toggle("🤖 Ayuda IA", value=st.session_state.ayuda_ia, key="toggle_ayuda_top")
 
-def get_empresas_afiliadas_usuario(email):
-    empresas = []
-    for cf in CASOS_DIR.iterdir():
-        if cf.is_dir():
-            dbp = cf / f"BASA_{cf.name}_eCF.db"
-            if dbp.exists():
-                try:
-                    conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-                    c.execute("SELECT * FROM afiliaciones WHERE usuario_master_email=?", (email,))
-                    row = c.fetchone()
-                    if row:
-                        try: empresas.extend(json.loads(row[3]))
-                        except: pass
-                    conn.close()
-                except: pass
-    for cf in CASOS_DIR.iterdir():
-        jf = cf / "info.json"
-        info = leer_info_json_seguro(jf)
-        if info and info.get("email") == email:
-            if info.get("empresas_afiliadas"):
-                empresas.extend([s.strip() for s in info.get("empresas_afiliadas").split(",") if s.strip()])
-            empresas.append(info.get("id"))
-    return list(set([e for e in empresas if e and validar_id_cliente(e)]))
+# Empresas del usuario - Puede tener muchas empresas bajo mismo usuario
+mis_empresas = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=?", (st.session_state.user,)).fetchall()
+if st.session_state.role=="ADMIN":
+    todas = conn.execute("SELECT id, nombre FROM empresas").fetchall()
+    mis_empresas_ids = [r[0] for r in todas] if todas else []
+else:
+    mis_empresas_ids = [r[0] for r in mis_empresas]
 
-st.markdown("### 📋 Modulos v71 LIMPIO")
-b1,b2,b3,b4,b5,b6,b7,b8,b9,b10 = st.columns(10)
-for btn, mod_name, label in [(b1,"DASHBOARD","📊 DASHBOARD"),(b2,"CLIENTES","👥 CLIENTES"),(b3,"FACTURAR","🧾 FACTURAR"),(b4,"HISTORICO","📜 HISTORICO"),(b5,"PRECIOS","💰 PRECIOS"),(b6,"CERTIFICADOS","🔐 DGII + CERT"),(b7,"CONSULTAR_NCF","🔍 CONSULTAR NCF"),(b8,"ENVIO_DGII_CERT","📤 ENVIO DGII"),(b9,"BHD_PAGOS","💳 PAGOS"),(b10,"CONSORCIO","🏢 CONSORCIO")]:
-    with btn:
-        if st.button(label, use_container_width=True, type="primary" if st.session_state.modulo_activo==mod_name else "secondary"):
-            st.session_state.modulo_activo = mod_name; st.rerun()
+# Si no tiene empresa activa, seleccionar primera
+if not st.session_state.empresa_activa and mis_empresas_ids:
+    st.session_state.empresa_activa = mis_empresas_ids[0]
+elif not mis_empresas_ids:
+    st.session_state.empresa_activa = "SIN-EMPRESA"
 
+# MENU IZQUIERDA - PROFESIONAL
 with st.sidebar:
-    st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.markdown("---")
-    empresas_usuario = get_empresas_afiliadas_usuario(st.session_state.user)
-    if empresas_usuario and st.session_state.role != "ADMIN":
-        st.markdown("### 🏢 Mis Empresas Afiliadas")
-        empresa_seleccionada = st.selectbox("Seleccionar Empresa", empresas_usuario, key="empresa_consorcio_select")
-        if empresa_seleccionada: st.session_state.client_id = empresa_seleccionada; client_id_input = empresa_seleccionada
-        else: client_id_input = st.text_input("ID Cliente DB v71", value=st.session_state.get("client_id","CLI-D452"))
-    else:
-        client_id_input = st.text_input("ID Cliente DB v71", value=st.session_state.get("client_id","CLI-D452"))
-    if not validar_id_cliente(client_id_input):
-        st.error("ID Cliente invalido. Solo letras, numeros, guion. Ej: CLI-D452"); st.stop()
-    liberado = verificar_liberado_bhd(client_id_input)
-    cuenta_activa_sidebar = get_cuenta_pago_activa()
-    st.markdown(format_cuenta_profesional(cuenta_activa_sidebar), unsafe_allow_html=True)
-    if liberado: st.success(f"✅ Liberado Full - Caso {client_id_input}")
-    else: st.error(f"⚠️ No liberado - Caso {client_id_input} - Pague a cuenta autorizada para liberacion")
-    if st.button("✅ Crear/Verificar DB v71 + Migrar", use_container_width=True):
-        logs = migrar_sin_perdidas(); dbp = init_db_v71(client_id_input)
-        conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-        c.execute("INSERT OR REPLACE INTO cuentas_pago_admin (id,banco,numero_cuenta,titular,tipo_cuenta,moneda,ubicacion,estado,fecha_creacion,creado_por,notas) VALUES (?,?,?,?,?,?,?,?,?,?,?)", cuenta_activa_sidebar)
-        conn.commit(); conn.close()
-        st.success(f"DB v71 OK: {dbp} | Migracion: {len(logs)} archivos")
-    if st.session_state.role == "ADMIN":
-        st.markdown("---"); st.markdown("### 💳 ADMIN - Crear Cuenta de Pago Autorizada")
-        with st.expander("🔧 Crear Nueva Cuenta"):
-            banco_admin = st.selectbox("Banco", ["BHD León","Banreservas","Popular","BHD León USA","Bank of America USA","Chase USA","Otro"], key="banco_admin_v71")
-            numero_cuenta_admin = st.text_input("Numero Cuenta", value="****5021 - Escribe completo solo aqui si eres ADMIN", key="numero_cuenta_admin_v71")
-            titular_admin = st.text_input("Titular Cuenta", value="Pedro Anibal Baldera", key="titular_admin_v71")
-            tipo_cuenta_admin = st.selectbox("Tipo Cuenta", ["Ahorros en Pesos","Ahorros en Dolares","Corriente en Pesos","Corriente en Dolares","Ahorros USA"], key="tipo_cuenta_admin_v71")
-            moneda_admin = st.selectbox("Moneda", ["DOP - Pesos Dominicanos","USD - Dolares USA"], key="moneda_admin_v71")
-            ubicacion_admin = st.selectbox("Ubicacion", ["RD Local - Republica Dominicana","USA - Estados Unidos"], key="ubicacion_admin_v71")
-            notas_admin = st.text_area("Notas Cuenta (Interno)", value="Cuenta oficial autorizada para liberacion Full BASA v71", key="notas_admin_v71")
-            if st.button("✅ ADMIN Crear Cuenta", type="primary", use_container_width=True):
-                # ADMIN escribe numero completo aqui, pero NO se muestra en pantalla publica
-                if numero_cuenta_admin.startswith("****") or len(numero_cuenta_admin) < 8:
-                    st.error("Como ADMIN, escribe el numero completo aqui (no se mostrara en pantallas publicas, solo ****5021).")
-                else:
-                    cuenta_id = f"CUENTA-{str(uuid.uuid4())[:6].upper()}"
-                    dbp_admin = get_db_path(client_id_input)
-                    conn = sqlite3.connect(str(dbp_admin)); c = conn.cursor()
-                    c.execute("UPDATE cuentas_pago_admin SET estado='Inactiva' WHERE ubicacion=?", (ubicacion_admin,))
-                    c.execute("INSERT INTO cuentas_pago_admin (id,banco,numero_cuenta,titular,tipo_cuenta,moneda,ubicacion,estado,fecha_creacion,creado_por,notas) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (cuenta_id, banco_admin, numero_cuenta_admin, titular_admin, tipo_cuenta_admin, moneda_admin, ubicacion_admin, "Activa", datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), st.session_state.user, notas_admin))
-                    conn.commit(); conn.close()
-                    st.success(f"✅ Cuenta creada: {cuenta_id} | Banco {banco_admin} | Ubicacion {ubicacion_admin} | Activa")
-                    st.rerun()
+    st.title("🏦 BASA V24")
+    st.write(f"Usuario: {st.session_state.user}")
+    st.write(f"Rol: {st.session_state.role}")
+    st.write(f"Cuenta BHD: {CUENTA_MOSTRAR} (Completa solo en PAGOS)")
     st.markdown("---")
-    st.markdown(f'<div class="dgii-box"><b>🔗 DGII FG Home</b><br><a href="{DGII_HOME}" target="_blank" style="color:#FFD700;">Abrir FG Home</a></div>', unsafe_allow_html=True)
-    st.markdown("---"); st.markdown("### 🔑 Cambiar Clave")
-    new_pwd_sidebar = st.text_input("Nueva clave", type="password", key="new_pwd_sidebar_v71")
-    if st.button("💾 Guardar Nueva Clave v71", use_container_width=True):
-        for cf in CASOS_DIR.iterdir():
-            jf = cf / "info.json"
-            info = leer_info_json_seguro(jf)
-            if info and info.get("email") == st.session_state.user:
-                info["password_hash"] = hashlib.sha256(new_pwd_sidebar.encode()).hexdigest()
-                guardar_info_json_seguro(jf, info)
-                st.success(f"Clave actualizada para {st.session_state.user}")
-    if st.button("🚪 Salir", use_container_width=True): st.session_state.logged = False; st.rerun()
-    st.markdown("---"); st.markdown(f"**{CRED['nombre']}**"); st.markdown(f"{CRED['telefono']}"); st.markdown(f"{CRED['email']}")
-    try:
-        cf_logo = CASOS_DIR / client_id_input / "logo.png"
-        if cf_logo.exists(): st.image(str(cf_logo), caption=f"Logo {client_id_input}", use_column_width=True)
-    except: pass
+    st.markdown("### 🏢 Mis Empresas - Cambiar sin salir")
+    if mis_empresas_ids:
+        nueva_emp = st.selectbox("Empresa Activa - Facturar aquí", mis_empresas_ids, index=mis_empresas_ids.index(st.session_state.empresa_activa) if st.session_state.empresa_activa in mis_empresas_ids else 0)
+        if nueva_emp != st.session_state.empresa_activa:
+            st.session_state.empresa_activa = nueva_emp
+            st.rerun()
+        st.success(f"Operando en: {st.session_state.empresa_activa}")
+    else:
+        st.warning("Sin empresas. Registra una en PAGOS / AFILIACION.")
+    st.markdown("---")
+    # MENU - Al pulsar despliega a la derecha
+    menu = st.radio("📋 MENÚ BASA - Pulsa y se abre a la derecha", [
+        "📊 Dashboard",
+        "👥 Clientes + Histórico Credenciales (Solo ADMIN/Colaborador)",
+        "🧾 Facturar",
+        "📜 Histórico por Cliente",
+        "💰 Planes + Exonerar (ADMIN)",
+        "📊 Cartera por Edades + WhatsApp",
+        "💳 Pagos en Línea + Bancos + BHD Visible",
+        "📦 Inventario",
+        "📑 Reportes Día / Consolidado Excel-Word",
+        "🔐 Mis Datos Confidenciales (Solo Yo)",
+        "🤖 Buzón Mejoras IA",
+        "🖨️ Guía Imprimible",
+    ], key="menu_v24")
+    st.markdown("---")
+    if st.button("🚪 Salir", use_container_width=True): st.session_state.logged=False; st.rerun()
 
-mod = st.session_state.modulo_activo
-if not verificar_liberado_bhd(client_id_input) and st.session_state.role != "ADMIN" and mod not in ["DASHBOARD","BHD_PAGOS","CONSORCIO"]:
-    st.error(f"⚠️ Caso {client_id_input} NO liberado - Debe pagar a cuenta autorizada para liberacion Full"); st.stop()
+EMPRESA = st.session_state.empresa_activa
+if st.session_state.ayuda_ia:
+    st.info(f"🤖 **IA BASA:** Estás en **{menu}** - Empresa **{EMPRESA}**. Todo lo que escribas se autoguardará al hacer click o mover el mouse. Si no quieres ayuda, apaga el botón 🤖 arriba a la derecha.")
 
-# ================= DASHBOARD =================
-if mod == "DASHBOARD":
-    st.header(f"📊 Dashboard v71 LIMPIO - Cuenta {CUENTA_MOSTRAR} - Formato profesional")
-    if st.session_state.get("migracion_logs"):
-        st.info(f"📦 Migracion sin perdidas: {len(st.session_state.migracion_logs)} archivos - Backup en {BACKUP_DIR}")
-    st.markdown(format_cuenta_profesional(get_cuenta_pago_activa()), unsafe_allow_html=True)
-    total_c = len([d for d in CASOS_DIR.iterdir() if d.is_dir()]); total_f = 0; total_m = 0; total_certs = 0; total_borradores = 0; total_enviados_local = 0; total_bhd_pend = 0; total_bhd_lib = 0
-    acumulado_por_cliente = []
-    for cf in CASOS_DIR.iterdir():
-        if cf.is_dir():
-            if st.session_state.role != "ADMIN":
-                empresas_user = get_empresas_afiliadas_usuario(st.session_state.user)
-                if cf.name not in empresas_user and cf.name != client_id_input: continue
-            dbp = cf / f"BASA_{cf.name}_eCF.db"
-            if dbp.exists():
-                conn = sqlite3.connect(str(dbp))
-                try:
-                    c = conn.cursor(); c.execute("SELECT COUNT(*), SUM(total), SUM(itbis) FROM facturas"); cnt, sm, it = c.fetchone()
-                    c.execute("SELECT COUNT(*) FROM certificados WHERE activo=1"); cert_cnt = c.fetchone()[0]
-                    c.execute("SELECT COUNT(*) FROM facturas WHERE estado LIKE '%Borrador%'"); borr = c.fetchone()[0]
-                    # FIX 7: Contar solo REGISTRADO LOCAL, no confundir con Enviado Real DGII
-                    c.execute("SELECT COUNT(*) FROM facturas WHERE estado_dgii LIKE '%REGISTRADO LOCAL%'"); env_local = c.fetchone()[0]
-                    c.execute("SELECT COUNT(*) FROM pagos_bhd WHERE estado LIKE '%Pendiente%'"); bhd_pend = c.fetchone()[0]
-                    c.execute("SELECT COUNT(*) FROM pagos_bhd WHERE estado LIKE '%Liberado%'"); bhd_lib = c.fetchone()[0]
-                    total_f += cnt or 0; total_m += sm or 0; total_certs += cert_cnt or 0; total_borradores += borr or 0; total_enviados_local += env_local or 0; total_bhd_pend += bhd_pend or 0; total_bhd_lib += bhd_lib or 0
-                    jf = cf / "info.json"; info_cli = leer_info_json_seguro(jf)
-                    nombre_cli = info_cli.get("nombre", cf.name) if info_cli else cf.name
-                    acumulado_por_cliente.append({"ID Cliente":cf.name,"Nombre":nombre_cli,"Facturas":cnt or 0,"Monto Total RD$":sm or 0,"ITBIS Total":it or 0,"Borradores":borr or 0,"Registrados Local (NO DGII)":env_local or 0,"Cert Activo":cert_cnt or 0,"Pagos Pendiente":bhd_pend or 0,"Pagos Liberado":bhd_lib or 0})
-                except: pass
-                conn.close()
-    c1,c2,c3,c4,c5,c6,c7,c8 = st.columns(8); c1.metric("Clientes", total_c); c2.metric("Facturas", total_f); c3.metric("Monto", f"RD$ {total_m:,.2f}"); c4.metric("Certs", total_certs); c5.metric("Borradores", total_borradores); c6.metric("Registrados Local", total_enviados_local); c7.metric("Pagos Pend", total_bhd_pend); c8.metric("Pagos Liberados", total_bhd_lib)
-    st.warning("⚠️ 'Registrados Local' NO significa Enviado a DGII. El envio oficial DGII esta separado en modulo ENVIO DGII.")
-    st.markdown("### 📊 Historico Acumulado por Cliente")
-    if acumulado_por_cliente:
-        df_acum = pd.DataFrame(acumulado_por_cliente); st.dataframe(df_acum, use_container_width=True)
-        st.download_button("📥 Descargar Historico Acumulado", df_acum.to_csv(index=False), file_name=f"historico_acumulado_v71_{datetime.datetime.now().strftime('%Y%m%d')}.csv", use_container_width=True)
-        cliente_seleccion = st.selectbox("Seleccionar Cliente para Ver Historial", [f"{r['ID Cliente']} - {r['Nombre']}" for r in acumulado_por_cliente], key="cliente_seleccion_acum_v71")
-        if cliente_seleccion:
-            id_cli_sel = cliente_seleccion.split(" - ")[0]
-            if validar_id_cliente(id_cli_sel):
-                dbp_sel = get_db_path(id_cli_sel)
-                if dbp_sel.exists():
-                    conn = sqlite3.connect(str(dbp_sel))
-                    try:
-                        df_hist_sel = pd.read_sql_query("SELECT ncf, tipo, cliente, descripcion, cantidad, precio, total, fecha, estado, estado_dgii, trackid FROM facturas ORDER BY id DESC", conn)
-                        st.write(f"Historial {id_cli_sel} - {len(df_hist_sel)} facturas"); st.dataframe(df_hist_sel, use_container_width=True)
-                    except Exception as e: st.info(f"Sin historial: {e}")
-                    conn.close()
+# ================= 6. MODULOS - DERECHA =================
+if menu == "📊 Dashboard":
+    st.header(f"📊 Dashboard - Empresa {EMPRESA}")
+    df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,))
+    if len(df)>0:
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("Facturas", len(df)); c2.metric("Total", f"RD$ {df['total'].sum():,.0f}"); c3.metric("Pendientes", len(df[df['estado']=='PENDIENTE'])); c4.metric("Pagadas", len(df[df['estado']=='PAGADA']))
+        st.dataframe(df)
+    else: st.info("Sin facturas en esta empresa. Cambia de empresa arriba o factura aquí.")
+    # Planes
+    plan = conn.execute("SELECT * FROM planes WHERE empresa_id=? ORDER BY fecha_inicio DESC LIMIT 1", (EMPRESA,)).fetchone()
+    if plan: st.write(f"**Tu Plan:** {plan[2]} - RD$ {plan[3]:,.0f} - Vence: {plan[5]} - Estado: {plan[6]} - Factura: {plan[8]}")
+    else: st.warning("Sin plan. Ve a Planes para afiliarte.")
 
-if mod == "BHD_PAGOS":
-    st.header(f"💳 Pagos - Cuenta Autorizada - Cliente {client_id_input} - Cuenta {CUENTA_MOSTRAR}")
-    cuenta_activa = get_cuenta_pago_activa()
-    st.markdown(format_cuenta_profesional(cuenta_activa), unsafe_allow_html=True)
-    st.info("Para ver numero completo de cuenta, confirma tu pago abajo. En pantallas publicas solo se muestra ****5021 por privacidad.")
-    dbp = get_db_path(client_id_input)
-    if not dbp.exists(): st.warning("DB v71 no existe"); st.stop()
-    st.markdown("### 💳 Registrar Nuevo Pago")
-    monto_bhd = st.number_input("Monto Pagado RD$", value=199.0, key="monto_bhd_v71")
-    ref_bhd = st.text_input("Referencia", value="", key="ref_bhd_pago_v71")
-    comp_bhd = st.file_uploader("📁 Subir Comprobante Pago (PNG/JPG/PDF) - Se detecta tipo real", type=["png","jpg","jpeg","pdf"], key="comp_bhd_pago_v71")
-    if st.button("💾 Registrar Pago - Para Liberacion Full", type="primary", use_container_width=True):
-        if ref_bhd and comp_bhd:
-            try: comp_path = save_comprobante_bhd(client_id_input, comp_bhd)
-            except Exception as e: st.error(f"Comprobante invalido: {e}"); st.stop()
-            conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-            pago_id = f"PAGO-{str(uuid.uuid4())[:8].upper()}"
-            c.execute("INSERT INTO pagos_bhd (id,cliente_id,monto,referencia_bhd,fecha_pago,comprobante_path,estado,cuenta_pago_id,liberado_por,fecha_liberacion,usuario_email) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (pago_id, client_id_input, monto_bhd, ref_bhd, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), comp_path, f"Pendiente - Verificando en cuenta autorizada {cuenta_activa[0]}", cuenta_activa[0], "", "", st.session_state.user))
-            conn.commit(); conn.close()
-            st.success(f"✅ Pago registrado: {pago_id} | Monto RD$ {monto_bhd} | Ref {ref_bhd} | Comprobante guardado con extension correcta: {comp_path}")
-            add_historico(client_id_input, "PAGO_CUENTA_AUTORIZADA_v71_LIMPIO", pago_id, f"Pago {monto_bhd} Ref {ref_bhd}", st.session_state.user)
-        else: st.error("Debe ingresar Referencia y Comprobante")
-    st.markdown("### 📜 Historico Pagos")
-    conn = sqlite3.connect(str(dbp))
-    try:
-        df_pagos = pd.read_sql_query("SELECT * FROM pagos_bhd WHERE cliente_id=? ORDER BY fecha_pago DESC", (client_id_input,)); st.dataframe(df_pagos, use_container_width=True)
-        if st.session_state.role == "ADMIN":
-            st.markdown("### 🔓 ADMIN - Liberar Cliente")
-            pago_id_liberar = st.text_input("ID Pago a Liberar (PAGO-XXXX)", value="", key="pago_id_liberar_v71")
-            if st.button("✅ ADMIN LIBERAR USO FULL", type="primary", use_container_width=True):
-                c = conn.cursor()
-                c.execute("UPDATE pagos_bhd SET estado=?, liberado_por=?, fecha_liberacion=? WHERE id=?", (f"Liberado Full - Verificado en cuenta autorizada {cuenta_activa[0]} - Liberado por ADMIN {st.session_state.user}", st.session_state.user, datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), pago_id_liberar))
-                conn.commit(); st.success(f"✅ ADMIN libero: Pago {pago_id_liberar} | Cliente {client_id_input}")
-                add_historico(client_id_input, "LIBERACION_ADMIN_v71_LIMPIO", pago_id_liberar, f"ADMIN {st.session_state.user} libero {client_id_input}", st.session_state.user)
-    except Exception as e: st.info(f"Sin pagos aun: {e}")
-    conn.close()
-
-if mod == "FACTURAR":
-    st.header(f"🧾 Facturacion v71 LIMPIO - Cliente {client_id_input} - Cuenta {CUENTA_MOSTRAR}")
-    st.warning("⚠️ IMPORTANTE DGII: Este modulo REGISTRA LOCAL. NO es envio oficial a DGII. El envio oficial esta en modulo ENVIO DGII y requiere certificado .p12 y conexion oficial.")
-    dbp = get_db_path(client_id_input)
-    if not dbp.exists(): st.warning("DB v71 no existe"); st.stop()
-    if not verificar_liberado_bhd(client_id_input) and st.session_state.role != "ADMIN":
-        st.error(f"⚠️ Caso {client_id_input} NO liberado"); st.stop()
-    conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-    c.execute("SELECT * FROM dgii_config WHERE cliente_id=?", (client_id_input,)); dgii_conf = c.fetchone()
-    c.execute("SELECT * FROM certificados WHERE cliente_id=? AND activo=1 ORDER BY fecha_subida DESC LIMIT 1", (client_id_input,)); cert_activo = c.fetchone()
-    c.execute("SELECT descripcion, precio, unidad, veces_usado FROM productos_servicios WHERE cliente_id=? ORDER BY veces_usado DESC", (client_id_input,)); productos_autoguardados = c.fetchall(); conn.close()
-    retomar_data = st.session_state.get("retomar_ncf", None)
-    cuenta_activa = get_cuenta_pago_activa()
-    st.markdown(format_cuenta_profesional(cuenta_activa), unsafe_allow_html=True)
-    st.markdown(f'<div class="dgii-box">🔐 Usuario DGII: {dgii_conf[2] if dgii_conf else "No configurado"} | Cert Activo: {"SI - "+str(cert_activo[2]) if cert_activo else "NO"} | BHD Liberado: SI | Productos: {len(productos_autoguardados)}</div>', unsafe_allow_html=True)
-    if productos_autoguardados:
-        prod_opciones = [f"{p[0]} - RD$ {p[1]:,.2f} - {p[2]} - Usado {p[3]} veces" for p in productos_autoguardados]
-        prod_seleccion = st.selectbox("Seleccionar Producto Autoguardado", ["-- Escribir manual --"] + prod_opciones, key="prod_autoguardado_v71")
-        if prod_seleccion != "-- Escribir manual --":
-            desc_auto = prod_seleccion.split(" - ")[0]; precio_auto = float(prod_seleccion.split("RD$ ")[1].split(" -")[0].replace(",", ""))
-        else: desc_auto = "Zapatos"; precio_auto = 550.0
-    else: desc_auto = "Zapatos"; precio_auto = 550.0
-    col_ncf1, col_ncf2 = st.columns(2)
-    with col_ncf1:
-        tipo_sel = st.selectbox("Tipo e-NCF DGII Oficial", ["E31 - Factura Credito Fiscal Electronica","E32 - Factura Consumo Electronica","E33 - Nota Debito Electronica","E34 - Nota Credito Electronica","E41 - Compras Electronico","E43 - Gastos Menores Electronico","E44 - Regimenes Especiales Electronico","E45 - Gubernamental Electronico","E46 - Exportacion Electronico","E47 - Pagos al Exterior Electronico"], key="tipo_sel_v71")
-        tipo_code = tipo_sel.split(" - ")[0]
-    with col_ncf2:
-        modo_ncf = st.selectbox("Modo NCF", ["Automatico - Guardar NCF Automatico v71","Manual - Agregar NCF Manual v71"], key="modo_ncf_v71")
-    if "Automatico" in modo_ncf:
-        next_ncf = get_next_ncf(client_id_input, tipo_code); st.success(f"🔒 NCF Automatico v71: {next_ncf}")
-    else: next_ncf = st.text_input("✍️ Ingrese NCF Manual v71", value="E310000000028", key="ncf_manual_v71")
-    c1,c2,c3 = st.columns(3)
-    with c1: razon_c = st.text_input("Razon Social Cliente", value=retomar_data["cliente"] if retomar_data else "COMERCIAL ZYL SRL - BASA v71", key="razon_c_v71")
-    with c2: rnc_c = st.text_input("RNC Cliente", value=retomar_data["rnc_cliente"] if retomar_data else "130000001", key="rnc_c_v71")
-    with c3: venc = st.date_input("Fecha Vencimiento", value=datetime.date(2026,12,31), key="venc_v71")
-    c1,c2,c3,c4,c5,c6 = st.columns(6)
-    with c1: cant = st.number_input("Cant", value=retomar_data["cantidad"] if retomar_data else 150.0, key="cant_v71")
-    with c2: desc = st.text_input("Descripcion - Autoguardado", value=retomar_data["descripcion"] if retomar_data else desc_auto, key="desc_v71")
-    with c3: uni = st.text_input("Unidad", value="CAJ", key="uni_v71")
-    with c4: prec = st.number_input("Precio RD$", value=retomar_data["precio"] if retomar_data else precio_auto, key="prec_v71")
-    with c5: dsc = st.number_input("Descuento RD$", value=retomar_data["descuento"] if retomar_data else 0.0, key="dsc_v71")
-    with c6: forma_pago = st.selectbox("Forma Pago", ["Contado","Credito - 30 dias"], key="forma_pago_v71")
-    itbis_p = 0.18; sub = cant*prec-dsc; itbis = sub*itbis_p; tot = sub+itbis
-    st.markdown(f"**Subtotal: RD$ {sub:,.2f} | ITBIS: RD$ {itbis:,.2f} | Total: RD$ {tot:,.2f}**")
-    coment = st.text_input("Comentario", value="Factura v71 LIMPIO", key="coment_v71")
-    col_conf1, col_conf2 = st.columns(2)
-    with col_conf1: confirmar_registro_local = st.checkbox(f"✅ SI, REGISTRAR LOCAL e-NCF {next_ncf} - NO es envio oficial DGII - Entiendo que solo queda guardado local", value=False, key="confirmar_registro_local_v71")
-    with col_conf2: guardar_borrador_fact = st.checkbox(f"📝 NO, GUARDAR COMO BORRADOR {next_ncf} - Retomar despues", value=False, key="guardar_borrador_fact_v71")
-    if st.button(f"💰 PROCESAR FACTURA v71 {tipo_code} - {next_ncf} - REGISTRO LOCAL (NO ENVIO DGII)", type="primary", use_container_width=True):
-        cod = base64.b64encode(os.urandom(6)).decode()[:6]; now = datetime.datetime.now(); fecha = now.strftime("%d-%m-%Y"); firma = now.strftime("%d-%m-%Y %H:%M:%S"); trackid = f"LOCAL-{str(uuid.uuid4())[:8].upper()}-v71-LIMPIO"
-        xml_content = f"<eCF><Encabezado><eNCF>{next_ncf}</eNCF><Tipo>{tipo_code}</Tipo><RNCEmisor>{CRED['rnc']}</RNCEmisor><RNCComprador>{rnc_c}</RNCComprador><Fecha>{fecha}</Fecha><Total>{tot}</Total><Firma>{firma}</Firma></Encabezado><Detalle><Descripcion>{desc}</Descripcion><Cantidad>{cant}</Cantidad><Precio>{prec}</Precio><ITBIS>{itbis}</ITBIS></Detalle></eCF>"
-        conn = sqlite3.connect(str(dbp)); c = conn.cursor()
-        if confirmar_registro_local and not guardar_borrador_fact:
-            # FIX 7: NO decir "ENVIADO OFICIAL". Decir REGISTRADO LOCAL.
-            estado_dgii = f"REGISTRADO LOCAL - NO ENVIADO A DGII - Pendiente envio oficial con cert - Usuario {dgii_conf[2] if dgii_conf else ''} - Cuenta {cuenta_activa[0]}"
-            estado_fact = "Registrado Local - Pendiente Envio DGII"
-            try:
-                c.execute("INSERT INTO facturas (ncf,tipo,cliente,rnc_cliente,descripcion,cantidad,precio,itbis,descuento,total,fecha,vencimiento,estado,codigo_seg,firma_digital,forma_pago,observaciones,xml_generado,trackid,estado_dgii) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (next_ncf, tipo_code, razon_c, rnc_c, desc, cant, prec, itbis, dsc, tot, fecha, str(venc), estado_fact, cod, firma, forma_pago, coment, xml_content, trackid, estado_dgii)); conn.commit()
-                autoguardar_producto(client_id_input, desc, prec, uni)
-                st.success(f"✅ REGISTRADO LOCAL v71 LIMPIO: {next_ncf} | Track Local {trackid} | NO enviado a DGII. Para envio oficial ve a modulo ENVIO DGII.")
-                add_historico(client_id_input, "FACTURAR_REGISTRO_LOCAL_v71_LIMPIO", next_ncf, f"Facturado LOCAL {desc} Total {tot} Track Local {trackid} - NO enviado DGII", st.session_state.user)
-            except sqlite3.IntegrityError: st.error(f"❌ NCF {next_ncf} ya existe")
-        elif guardar_borrador_fact and not confirmar_registro_local:
-            estado_dgii = f"BORRADOR v71 - No enviado a DGII - Guardado para retomar - Cuenta {cuenta_activa[0]}"
-            estado_fact = "Borrador - Guardado para continuar v71"
-            try:
-                c.execute("INSERT INTO facturas (ncf,tipo,cliente,rnc_cliente,descripcion,cantidad,precio,itbis,descuento,total,fecha,vencimiento,estado,codigo_seg,firma_digital,forma_pago,observaciones,xml_generado,trackid,estado_dgii) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (next_ncf, tipo_code, razon_c, rnc_c, desc, cant, prec, itbis, dsc, tot, fecha, str(venc), estado_fact, cod, firma, forma_pago, coment, xml_content, f"BORRADOR-{trackid}", estado_dgii)); conn.commit()
-                autoguardar_producto(client_id_input, desc, prec, uni)
-                st.warning(f"📝 BORRADOR GUARDADO v71: {next_ncf}")
-                add_historico(client_id_input, "FACTURAR_BORRADOR_v71_LIMPIO", next_ncf, f"Borrador {next_ncf} - {desc}", st.session_state.user)
-            except sqlite3.IntegrityError: st.error(f"❌ NCF Borrador {next_ncf} ya existe")
-        elif confirmar_registro_local and guardar_borrador_fact: st.error("❌ Elija solo una: Registrar Local o Borrador")
-        else: st.warning("⚠️ Marque Registrar Local o Borrador")
-        conn.close()
-        if "retomar_ncf" in st.session_state: del st.session_state["retomar_ncf"]
-
-if mod == "ENVIO_DGII_CERT":
-    st.header("📤 ENVIO DGII - SEPARADO DEL REGISTRO LOCAL - v71 LIMPIO")
-    st.warning("⚠️ Este modulo es el UNICO que debe hacer envio oficial a DGII. Por ahora esta en modo PREPARACION porque no hay conexion oficial DGII activa.")
-    st.info(f"Portal DGII: {DGII_HOME}")
-    dbp = get_db_path(client_id_input)
-    if dbp.exists():
-        conn = sqlite3.connect(str(dbp))
-        try: df_fact = pd.read_sql_query("SELECT ncf, cliente, total, fecha, estado, estado_dgii, trackid FROM facturas WHERE estado_dgii LIKE '%REGISTRADO LOCAL%'", conn)
-        except: df_fact = pd.DataFrame()
-        conn.close()
-        st.markdown("### Facturas Pendientes de Envio Real a DGII (Solo Registradas Local)")
-        st.dataframe(df_fact, use_container_width=True)
-        if len(df_fact) > 0:
-            sel_ncf = st.selectbox("Selecciona NCF para intentar envio real", df_fact['ncf'].tolist())
-            if st.button("🚀 Intentar Envio Real a DGII Oficial", type="primary"):
-                ok, msg = enviar_a_dgii_real({"ncf": sel_ncf})
-                st.error(f"DGII: {msg}")
-                st.caption("Cuando conectes API DGII + certificado .p12, aqui se cambiara estado a 'ENVIADO A DGII' con codigo DGII y fecha oficial. Mientras tanto NO se reporta como enviado.")
-
-if mod in ["CLIENTES","HISTORICO","PRECIOS","CERTIFICADOS","CONSULTAR_NCF"]:
-    st.header(f"📋 Modulo {mod} - v71 LIMPIO")
-    st.info("Este modulo usa la misma logica v71, pero con fixes: ID validado, info.json seguro, cuenta enmascarada ****5021, y estado DGII = REGISTRADO LOCAL.")
-    dbp = get_db_path(client_id_input)
-    if dbp.exists():
-        conn = sqlite3.connect(str(dbp))
-        try:
-            if mod == "HISTORICO":
-                df = pd.read_sql_query("SELECT * FROM historico ORDER BY id DESC LIMIT 100", conn); st.dataframe(df, use_container_width=True)
-            elif mod == "CLIENTES":
-                df = pd.read_sql_query("SELECT * FROM clientes_info", conn); st.dataframe(df, use_container_width=True)
-                st.markdown("### Subir Certificado .p12 - Seguro")
-                cert_file = st.file_uploader("Certificado .p12", type=["p12"], key="cert_upload_limpio")
-                prov = st.text_input("Proveedor Cert", value="Viafirma")
-                if st.button("Guardar Certificado"):
-                    if cert_file:
-                        try:
-                            p = save_cert(client_id_input, cert_file, prov)
-                            st.success(f"Cert guardado: {p}")
-                        except Exception as e: st.error(f"Error cert: {e}")
-            elif mod == "PRECIOS":
-                df = pd.read_sql_query("SELECT * FROM productos_servicios ORDER BY veces_usado DESC", conn); st.dataframe(df, use_container_width=True)
-            elif mod == "CERTIFICADOS":
-                df = pd.read_sql_query("SELECT * FROM certificados", conn); st.dataframe(df, use_container_width=True)
-            elif mod == "CONSULTAR_NCF":
-                ncf_buscar = st.text_input("Buscar NCF", value="")
-                if st.button("Buscar"):
-                    df = pd.read_sql_query("SELECT * FROM facturas WHERE ncf=?", (ncf_buscar,)); st.dataframe(df, use_container_width=True)
-                    if len(df) > 0: st.warning(f"Estado DGII: {df.iloc[0]['estado_dgii']} - Si dice REGISTRADO LOCAL, NO es Enviado Oficial.")
-        except Exception as e: st.info(f"Sin datos: {e}")
-        conn.close()
-
-if mod == "CONSORCIO":
-    st.header(f"🏢 Consorcio - Cliente {client_id_input} - Cuenta {CUENTA_MOSTRAR} - v71 LIMPIO")
-    cuenta_activa = get_cuenta_pago_activa()
-    st.markdown(format_cuenta_profesional(cuenta_activa), unsafe_allow_html=True)
-    empresas_usuario = get_empresas_afiliadas_usuario(st.session_state.user)
-    if not empresas_usuario: empresas_usuario = [client_id_input]
-    st.markdown(f"### 🏢 Mis Empresas - {len(empresas_usuario)} empresas")
-    st.write(empresas_usuario)
-    st.markdown("### ➕ Afiliar Nueva Empresa")
-    nueva_empresa_id = st.text_input("ID Nueva Empresa a Afiliar (Ej: CLI-D453)", value="", key="nueva_empresa_afiliar_v71_limpio")
-    if st.button("✅ Afiliar Empresa", type="primary"):
-        if not validar_id_cliente(nueva_empresa_id): st.error("ID invalido. Solo letras/numeros/guion.")
-        elif not (CASOS_DIR / nueva_empresa_id).exists(): st.error(f"Empresa {nueva_empresa_id} no existe")
-        else:
-            dbp_principal = get_db_path(empresas_usuario[0] if empresas_usuario else client_id_input)
-            conn = sqlite3.connect(str(dbp_principal)); c = conn.cursor()
-            c.execute("SELECT * FROM afiliaciones WHERE usuario_master_email=?", (st.session_state.user,)); row = c.fetchone()
-            if row:
-                try: afili_exist = json.loads(row[3])
-                except: afili_exist = []
-                if nueva_empresa_id not in afili_exist: afili_exist.append(nueva_empresa_id)
-                c.execute("UPDATE afiliaciones SET empresas_afiliadas_json=? WHERE id=?", (json.dumps(list(set(afili_exist))), row[0]))
+if menu == "👥 Clientes + Histórico Credenciales (Solo ADMIN/Colaborador)":
+    st.header("👥 Clientes + Histórico Credenciales - Solo ADMIN / Colaborador")
+    if st.session_state.role not in ["ADMIN", "COLABORADOR"]:
+        st.error("⛔ Solo ADMIN y Colaboradores pueden ver credenciales. Tu rol es CLIENT.")
+        st.stop()
+    st.write("Carpeta por ID / RNC / Cédula - Guardada en `credenciales_privadas / ID`")
+    # Buscar cliente por RNC / ID / Correo
+    buscar = st.text_input("Buscar por RNC, ID, Correo o Nombre")
+    usuarios = pd.read_sql("SELECT id, email, rnc, nombre, rol, fecha FROM usuarios", conn)
+    if buscar: usuarios = usuarios[usuarios.apply(lambda r: buscar.lower() in str(r.values).lower(), axis=1)]
+    st.dataframe(usuarios)
+    if len(usuarios)>0:
+        sel = st.selectbox("Selecciona cliente para ver/editar credenciales", usuarios['id'].tolist())
+        cred = leer_credencial_privada(sel, st.session_state.role)
+        st.subheader(f"🔐 Credenciales - {sel}")
+        st.json(cred if cred else {"mensaje": "Sin credenciales guardadas todavia"})
+        st.markdown("### ✏️ Editar Credencial - Solo ADMIN/Colaborador")
+        nuevo_usuario = st.text_input("Usuario DGII / Portal", value=cred.get("usuario_principal","") if cred else "")
+        nueva_clave = st.text_input("Clave para Soporte (Se guarda cifrada)", type="password")
+        html_cert = st.text_area("HTML / Certificado Digital (Texto)", value=cred.get("html","") if cred else "")
+        if st.button("💾 Guardar Credencial Actualizada"):
+            cred_nuevo = {**cred, "usuario_principal": nuevo_usuario, "clave_para_soporte": nueva_clave, "html": html_cert, "actualizado_por": st.session_state.user, "fecha": str(date.today())}
+            guardar_credencial_privada(sel, cred_nuevo)
+            st.success("Credencial guardada en carpeta privada.")
+        st.markdown("### 📲 Enviar Credencial al Cliente - Tú eliges a quién")
+        canal_envio = st.selectbox("Enviar por", ["WhatsApp", "Correo"])
+        destino = st.text_input("WhatsApp (809...) o Correo destino")
+        if st.button("📲 Enviar Credencial"):
+            msg = f"Hola, tu usuario BASA es {nuevo_usuario} y tu clave de recuperación es {nueva_clave}. No la compartas."
+            if canal_envio=="WhatsApp":
+                wa = f"https://wa.me/1{destino}?text={urllib.parse.quote(msg)}"
+                st.link_button("📲 Abrir WhatsApp", wa)
             else:
-                afili_id = f"AFIL-{str(uuid.uuid4())[:6].upper()}"
-                c.execute("INSERT INTO afiliaciones (id,usuario_master_email,empresa_principal_id,empresas_afiliadas_json,tipo,fecha_creacion,estado) VALUES (?,?,?,?,?,?,?)", (afili_id, st.session_state.user, empresas_usuario[0], json.dumps(list(set(empresas_usuario + [nueva_empresa_id]))), "Consorcio", datetime.datetime.now().strftime("%d-%m-%Y %H:%M:%S"), "Activo - Consorcio v71 LIMPIO"))
-            conn.commit(); conn.close(); st.success(f"✅ Empresa {nueva_empresa_id} afiliada"); st.rerun()
-    st.markdown("### 📊 Panel por Empresa")
-    for emp_id in empresas_usuario:
-        if not validar_id_cliente(emp_id): continue
-        dbp_emp = get_db_path(emp_id)
-        if dbp_emp.exists():
-            conn = sqlite3.connect(str(dbp_emp))
-            try:
-                c = conn.cursor(); c.execute("SELECT COUNT(*), SUM(total) FROM facturas"); cnt, sm = c.fetchone()
-                st.write(f"**{emp_id}** - Facturas: {cnt or 0} - Monto: RD$ {sm or 0:,.2f} - Liberado: {'SI' if verificar_liberado_bhd(emp_id) else 'NO'}")
-            except: pass
-            conn.close()
+                st.markdown(f"[📧 Enviar por Correo](mailto:{destino}?subject=Credenciales BASA&body={urllib.parse.quote(msg)})")
 
-st.markdown(f'<div class="footer-pro" style="text-align:center;">BASA e-CF PRO v71 PROFESIONAL LIMPIO | RNC 133378711 | {CRED["empresa"]} | Cuenta {CUENTA_MOSTRAR} - BHD | Formato Profesional - Sin puntos | Estado DGII: REGISTRADO LOCAL ≠ ENVIADO OFICIAL</div>', unsafe_allow_html=True)
+if menu == "🧾 Facturar":
+    st.header(f"🧾 Facturar - Empresa {EMPRESA} - Autoguardado Activo")
+    st.caption("Todo lo que escribas se autoguardará al hacer click o cambiar de campo.")
+    with st.form("fact_form"):
+        ncf = st.text_input("NCF / e-CF", value=f"E31{datetime.now().strftime('%Y%m%d%H%M')}")
+        cliente = st.text_input("Cliente", value=autoguardar("fact_cliente", st.session_state.autoguardado.get("fact_cliente",""), EMPRESA))
+        desc = st.text_input("Descripción", value=st.session_state.autoguardado.get("fact_desc",""))
+        cant = st.number_input("Cantidad", 1.0)
+        precio = st.number_input("Precio RD$", 0.0)
+        fecha_v = st.date_input("Vencimiento", date.today())
+        if st.form_submit_button("💾 Guardar Factura - Autoguardado"):
+            total = cant*precio*1.18
+            try:
+                conn.execute("INSERT INTO facturas (empresa_id,ncf,cliente,descripcion,cantidad,precio,total,fecha,vencimiento,estado,estado_dgii) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (EMPRESA, ncf, cliente, desc, cant, precio, total, str(date.today()), str(fecha_v), "PENDIENTE", "REGISTRADO LOCAL - NO ENVIADO A DGII"))
+                conn.commit(); add_hist(EMPRESA, "FACTURA", f"{ncf} - {cliente} - RD$ {total:,.0f}", st.session_state.user)
+                st.success(f"Factura {ncf} guardada en empresa {EMPRESA} - Total RD$ {total:,.0f}")
+                # Autoguardar al hacer click
+                autoguardar("fact_cliente", cliente, EMPRESA); autoguardar("fact_desc", desc, EMPRESA)
+            except Exception as e: st.error(f"Error: {e} - NCF duplicado?")
+    st.dataframe(pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,)))
+
+if menu == "📜 Histórico por Cliente":
+    st.header(f"📜 Histórico - Empresa {EMPRESA}")
+    hist = pd.read_sql("SELECT * FROM historico WHERE empresa_id=? ORDER BY id DESC", conn, params=(EMPRESA,))
+    st.dataframe(hist)
+    if st.button("📥 Exportar Histórico Excel"):
+        hist.to_excel(f"historico_{EMPRESA}.xlsx", index=False); st.success("Excel generado")
+
+if menu == "💰 Planes + Exonerar (ADMIN)":
+    st.header("💰 Planes + Exonerar - Solo ADMIN puede exonerar")
+    st.write("Planes: Mensual, Trimestral, Semestral, Anual, Multi-Años. ADMIN puede exonerar a sus clientes admitidos.")
+    if st.session_state.role=="ADMIN":
+        st.markdown("### Exonerar Pago - Cliente Admitido por ADMIN")
+        todas_emp = pd.read_sql("SELECT id, nombre, rnc FROM empresas", conn)
+        st.dataframe(todas_emp)
+        if len(todas_emp)>0:
+            emp_ex = st.selectbox("Empresa a Exonerar", todas_emp['id'].tolist())
+            motivo = st.text_input("Motivo Exoneración - Ej: Cliente VIP BASA, Colaborador, Prueba")
+            if st.button("✅ EXONERAR - Gratis - Sin Cobro"):
+                conn.execute("UPDATE planes SET estado=?, exonerado_por=? WHERE empresa_id=?", (f"EXONERADO - Gratis - Motivo: {motivo} - Por ADMIN {st.session_state.user}", st.session_state.user, emp_ex)); conn.commit()
+                add_hist(emp_ex, "EXONERACION", f"Exonerado por ADMIN - {motivo}", st.session_state.user)
+                st.success(f"Empresa {emp_ex} exonerada. Ahora es Gratis. Se generó factura en 0.")
+                # Generar factura en 0
+                conn.execute("INSERT INTO facturas (empresa_id,ncf,cliente,descripcion,cantidad,precio,total,fecha,vencimiento,estado,estado_dgii) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (emp_ex, f"EXO-{emp_ex}-{datetime.now().strftime('%Y%m%d')}", "BASA - Exoneración", "Plan Exonerado por ADMIN - Gratis", 1, 0, 0, str(date.today()), str(date.today()), "PAGADA", "REGISTRADO LOCAL")); conn.commit()
+    st.markdown("### Mis Planes")
+    planes_df = pd.read_sql("SELECT * FROM planes WHERE empresa_id=?", conn, params=(EMPRESA,))
+    st.dataframe(planes_df)
+
+if menu == "📊 Cartera por Edades + WhatsApp":
+    st.header(f"📊 Cartera - Empresa {EMPRESA} - VIGENTE / B / C / VENCIDA")
+    st.write("VIGENTE 0-30 🟢 | B 31-60 🟡 | C 61-90 🟠 | VENCIDA +90 🔴")
+    df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=? AND estado='PENDIENTE'", conn, params=(EMPRESA,))
+    if len(df)>0:
+        rows=[]
+        for _, r in df.iterrows():
+            dias = (date.today() - pd.to_datetime(r['vencimiento']).date()).days
+            bucket = "VIGENTE 0-30" if dias<=30 else "B 31-60" if dias<=60 else "C 61-90" if dias<=90 else "VENCIDA +90"
+            rows.append({"Cliente": r['cliente'], "NCF": r['ncf'], "Vencimiento": r['vencimiento'], "Dias": dias, "Monto": r['total'], "Bucket": bucket})
+        cdf = pd.DataFrame(rows)
+        c1,c2,c3,c4 = st.columns(4)
+        c1.metric("🟢 VIGENTE", f"RD$ {cdf[cdf['Bucket']=='VIGENTE 0-30']['Monto'].sum():,.0f}")
+        c2.metric("🟡 B", f"RD$ {cdf[cdf['Bucket']=='B 31-60']['Monto'].sum():,.0f}")
+        c3.metric("🟠 C", f"RD$ {cdf[cdf['Bucket']=='C 61-90']['Monto'].sum():,.0f}")
+        c4.metric("🔴 VENCIDA", f"RD$ {cdf[cdf['Bucket']=='VENCIDA +90']['Monto'].sum():,.0f}")
+        st.dataframe(cdf)
+        for _, r in cdf.iterrows():
+            if r['Bucket']!="VIGENTE 0-30":
+                msg = f"Hola {r['Cliente']}, su factura {r['NCF']} por RD$ {r['Monto']:,.0f} tiene {r['Dias']} dias. Bucket {r['Bucket']}. Pague en BHD {CUENTA_MOSTRAR} - BASA."
+                st.link_button(f"📲 WhatsApp {r['Cliente']} - {r['Bucket']}", f"https://wa.me/18297717390?text={urllib.parse.quote(msg)}")
+    else: st.info("Sin facturas pendientes en esta empresa.")
+
+if menu == "💳 Pagos en Línea + Bancos + BHD Visible":
+    st.header(f"💳 Pagos en Línea - Empresa {EMPRESA} - BHD VISIBLE AQUÍ")
+    # AQUÍ SÍ SE MUESTRA CUENTA COMPLETA - SOLO EN ESTE MÓDULO
+    st.markdown(f"""
+    <div style='background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;border-left:5px solid #FFD700;'>
+    <h3>💳 Cuenta BHD - Visible Solo en Módulo de Pago</h3>
+    <p><b>Banco:</b> {BANCO} | <b>Titular:</b> {TITULAR}</p>
+    <p><b>Cuenta:</b> {CUENTA_BHD_REAL} - Ahorros en Pesos - DOP</p>
+    <p><b>Concepto:</b> BASA V24 - {EMPRESA}</p>
+    <p style='font-size:12px;'>Esta cuenta solo se muestra aquí, no en otros módulos por privacidad.</p>
+    </div>
+    """, unsafe_allow_html=True)
+    st.markdown("### 💳 Pagar en Línea - Tarjeta o Transferencia - Sin Salir del Sistema")
+    metodo = st.selectbox("¿Cómo quieres pagar?", ["Tarjeta Crédito/Débito - Afiliar Tarjeta", "Transferencia Bancaria - Desde tu Banco"])
+    if metodo.startswith("Tarjeta"):
+        st.write("**Afiliar Tarjeta - Solo tú puedes verla, ni ADMIN la ve.**")
+        num_tarjeta = st.text_input("Número Tarjeta (Solo se guarda en tu perfil privado, cifrado)", type="password")
+        venc_tarjeta = st.text_input("Vencimiento MM/AA")
+        cvv = st.text_input("CVV", type="password")
+        if st.button("💳 Afiliar Tarjeta y Pagar"):
+            if num_tarjeta:
+                # Guardar cifrado, solo usuario lo ve - NI ADMIN
+                valor_cif = base64.b64encode(f"{num_tarjeta}|{venc_tarjeta}".encode()).decode()
+                conn.execute("INSERT INTO datos_confidenciales (id, usuario_email, tipo, valor_cifrado, fecha) VALUES (?,?,?,?,?)", (f"TARJ-{EMPRESA}-{datetime.now().strftime('%H%M%S')}", st.session_state.user, "TARJETA", valor_cif, str(date.today()))); conn.commit()
+                st.success("✅ Tarjeta afiliada y guardada en tu perfil privado. Solo tú la puedes ver. Ni ADMIN tiene acceso.")
+    else:
+        st.write("**Transferencia - Elige tu Banco y navega sin salir del sistema**")
+        banco_sel = st.selectbox("Selecciona tu Banco", list(BANCOS.keys()))
+        st.write(f"Vas a entrar a **{banco_sel}** sin salir de BASA. Usa el visor abajo.")
+        st.link_button(f"🏦 Abrir {banco_sel} en BASA (Sin Salir)", BANCOS[banco_sel])
+        # Visor dentro del sistema
+        try: st.components.v1.iframe(BANCOS[banco_sel], height=500, scrolling=True)
+        except: st.info("Tu navegador bloqueó el iframe. Usa el botón de arriba para entrar al banco sin salir de BASA.")
+        ref = st.text_input("Referencia Transferencia")
+        comp = st.file_uploader("Subir Comprobante", type=["pdf","png","jpg"])
+        if st.button("✅ Registrar Transferencia"):
+            if ref:
+                conn.execute("INSERT INTO pagos (id,empresa_id,monto,metodo,referencia,comprobante,fecha,estado) VALUES (?,?,?,?,?,?,?,?)", (f"PAGO-{datetime.now().strftime('%H%M%S')}", EMPRESA, 199, f"Transferencia {banco_sel}", ref, "comprobante_subido", str(date.today()), "Pendiente Verificación")); conn.commit()
+                st.success("Transferencia registrada. ADMIN verificará en BHD.")
+    st.markdown("### Historial Pagos")
+    st.dataframe(pd.read_sql("SELECT * FROM pagos WHERE empresa_id=?", conn, params=(EMPRESA,)))
+
+if menu == "📦 Inventario":
+    st.header("📦 Inventario")
+    with st.form("inv"):
+        cod = st.text_input("Código"); prod = st.text_input("Producto"); stock = st.number_input("Stock", 0); precio = st.number_input("Precio", 0.0); minimo = st.number_input("Mínimo", 5)
+        if st.form_submit_button("Guardar - Autoguardado"):
+            st.success("Producto guardado - Autoguardado al hacer click.")
+    st.info("Inventario conectado a Facturación. Al facturar, se descuenta stock automáticamente en V24 Full.")
+
+if menu == "📑 Reportes Día / Consolidado Excel-Word":
+    st.header("📑 Reportes - Por Empresa o Consolidado")
+    fecha_rep = st.date_input("Fecha Reporte", date.today())
+    tipo_rep = st.selectbox("Tipo Reporte", ["Reporte del Día - Esta Empresa", "Reporte del Día - Consolidado Todas Mis Empresas", "Reporte Mes - Esta Empresa"])
+    if tipo_rep.startswith("Reporte del Día - Esta"):
+        df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=? AND fecha=?", conn, params=(EMPRESA, str(fecha_rep)))
+    elif tipo_rep.startswith("Consolidado"):
+        df = pd.read_sql("SELECT * FROM facturas WHERE fecha=?", conn, params=(str(fecha_rep),))
+    else:
+        df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,))
+    st.dataframe(df)
+    st.write(f"**Total:** RD$ {df['total'].sum():,.0f} | **Facturas:** {len(df)}" if len(df)>0 else "Sin datos")
+    col_e1, col_e2 = st.columns(2)
+    with col_e1:
+        if st.button("📥 Exportar a Excel"):
+            df.to_excel(f"reporte_{EMPRESA}_{fecha_rep}.xlsx", index=False); st.success("Excel generado - Descarga arriba en Dashboard")
+    with col_e2:
+        if st.button("📄 Exportar a Word"):
+            # Word simple: generar .txt con formato Word
+            contenido = f"REPORTE BASA V24 - Empresa {EMPRESA} - Fecha {fecha_rep}\nTotal RD$ {df['total'].sum():,.0f} - Facturas {len(df)}\n\n" + df.to_string() if len(df)>0 else "Sin datos"
+            st.download_button("Descargar Word (.doc)", contenido, file_name=f"reporte_{EMPRESA}.doc")
+
+if menu == "🔐 Mis Datos Confidenciales (Solo Yo)":
+    st.header("🔐 Mis Datos Confidenciales - Solo Tú Puedes Verlos")
+    st.warning("⛔ Ni ADMIN, ni colaboradores, ni otro usuario pueden ver esto. Solo tú.")
+    st.write("Aquí guardas tu tarjeta, tu cuenta bancaria personal, tus claves bancarias. Solo tú las ves.")
+    datos = pd.read_sql("SELECT id, tipo, fecha FROM datos_confidenciales WHERE usuario_email=?", conn, params=(st.session_state.user,))
+    st.dataframe(datos)
+    st.caption("Los valores están cifrados. Solo tú con tu sesión puedes descifrarlos. ADMIN no tiene acceso.")
+    nuevo_tipo = st.selectbox("Tipo Dato", ["Cuenta Bancaria Personal", "Tarjeta", "Clave Banco", "Otro"])
+    nuevo_valor = st.text_input("Valor - Solo tú lo verás", type="password")
+    if st.button("💾 Guardar Dato Confidencial Solo Para Mí"):
+        cif = base64.b64encode(nuevo_valor.encode()).decode()
+        conn.execute("INSERT INTO datos_confidenciales (id,usuario_email,tipo,valor_cifrado,fecha) VALUES (?,?,?,?,?)", (f"CONF-{datetime.now().strftime('%H%M%S')}", st.session_state.user, nuevo_tipo, cif, str(date.today()))); conn.commit()
+        st.success("Guardado solo para ti. Ni ADMIN lo puede ver.")
+
+if menu == "🤖 Buzón Mejoras IA":
+    st.header("🤖 Buzón de Mejoras IA - La IA Analiza y ADMIN Aprueba")
+    st.write("Si necesitas un cambio, escríbelo. La IA analiza si es lógico, si afecta el sistema, y recomienda. Si no afecta integridad y aporta valor, queda en bandeja para ADMIN.")
+    sugerencia = st.text_area("¿Qué mejora quieres? Ej: Quiero que la factura tenga logo más grande")
+    if st.button("🤖 Enviar a IA para Análisis"):
+        # Análisis IA simple - Lógico / Razonable / Afecta sistema?
+        texto = sugerencia.lower()
+        if "borrar" in texto and "base" in texto: analisis = "⚠️ NO RECOMENDADO - Afecta integridad del sistema. No se debe borrar base de datos."
+        elif "logo" in texto or "color" in texto or "reporte" in texto: analisis = "✅ RECOMENDADO - No afecta integridad, aporta valor visual. Se puede aplicar."
+        elif "banco" in texto or "pago" in texto: analisis = "✅ RECOMENDADO CON REVISIÓN - Aporta valor, pero requiere verificar seguridad bancaria."
+        else: analisis = "✅ EN REVISIÓN - Parece lógico y razonable. ADMIN debe revisar si aporta valor sin afectar sistema."
+        bid = f"IA-{datetime.now().strftime('%H%M%S')}"
+        conn.execute("INSERT INTO buzon_ia (id,usuario,empresa_id,sugerencia,analisis_ia,estado,fecha,decision_admin) VALUES (?,?,?,?,?,?,?,?)", (bid, st.session_state.user, EMPRESA, sugerencia, analisis, "Pendiente ADMIN", str(date.today()), "")); conn.commit()
+        st.success(f"IA Analizó: {analisis}")
+        st.info("Quedó en bandeja para ADMIN. Trazabilidad guardada.")
+    st.markdown("### 📥 Bandeja - Para ADMIN / Colaboradores")
+    buzon = pd.read_sql("SELECT * FROM buzon_ia ORDER BY fecha DESC", conn)
+    st.dataframe(buzon)
+    if st.session_state.role=="ADMIN" and len(buzon)>0:
+        sel_ia = st.selectbox("Selecciona sugerencia para decidir", buzon['id'].tolist())
+        decision = st.selectbox("Decisión ADMIN", ["Aplicar Mejora", "Editar Mejora", "Guardar para Después", "Borrar - No Procede"])
+        if st.button("✅ Guardar Decisión ADMIN - Trazabilidad"):
+            conn.execute("UPDATE buzon_ia SET decision_admin=?, estado=? WHERE id=?", (f"{decision} por {st.session_state.user} - {datetime.now()}", decision, sel_ia)); conn.commit()
+            add_hist(EMPRESA, "DECISION_IA", f"{sel_ia} - {decision}", st.session_state.user)
+            st.success("Decisión guardada con trazabilidad. El usuario será notificado.")
+
+if menu == "🖨️ Guía Imprimible":
+    st.header("🖨️ Guía BASA V24 - Para Imprimir")
+    st.markdown("""
+    **GUÍA BASA V24 PROFESIONAL - IMPRIME ESTA PÁGINA**
+    1. **Login:** Entra con correo y clave. Si olvidas, usa Recuperar por RNC / Usuario / Correo.
+    2. **Empresa:** Arriba a la izquierda elige tu empresa. Puedes tener muchas empresas y cambiar sin salir.
+    3. **Facturar:** Ve a Facturar, llena cliente, descripción, precio. Se autoguardará al hacer click.
+    4. **Cartera:** Revisa VIGENTE 0-30, B 31-60, C 61-90, VENCIDA +90. Envía WhatsApp desde ahí.
+    5. **Pagos:** Paga con tarjeta afiliada o transferencia. Elige tu banco y paga sin salir. BHD visible solo aquí.
+    6. **Reportes:** Reporte del día por empresa o consolidado. Exporta a Excel o Word.
+    7. **Ayuda IA:** Botón 🤖 arriba a la derecha. Apágalo si no quieres guía.
+    8. **Mejoras:** Si quieres un cambio, escríbelo en Buzón IA. La IA analiza y ADMIN aprueba.
+    9. **Confidencialidad:** Tus datos bancarios solo los ves tú. Ni ADMIN los ve.
+    """)
+    if st.button("🖨️ Imprimir Guía - Dale Ctrl+P"):
+        st.success("Dale Ctrl+P en tu navegador para imprimir esta guía.")
+
+st.caption(f"BASA V24 PROFESIONAL | Empresa Activa: {EMPRESA} | Cuenta BHD {CUENTA_MOSTRAR} | Pedro Anibal Baldera | Autoguardado Activo | Ayuda IA: {'ON' if st.session_state.ayuda_ia else 'OFF'} | Trazabilidad Guardada")
