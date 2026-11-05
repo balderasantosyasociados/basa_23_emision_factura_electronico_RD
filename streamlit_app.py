@@ -1,3 +1,43 @@
+import sys
+import subprocess
+import importlib.util
+
+
+def asegurar_dependencias():
+
+    paquetes = {
+        "streamlit": "streamlit>=1.40.0",
+        "pandas": "pandas>=2.2.0",
+        "openpyxl": "openpyxl>=3.1.5",
+        "xlsxwriter": "xlsxwriter>=3.2.0",
+        "sqlalchemy": "SQLAlchemy>=2.0.0",
+        "fastapi": "fastapi>=0.115.0",
+        "cryptography": "cryptography>=43.0.0",
+        "lxml": "lxml>=5.3.0",
+        "signxml": "signxml>=4.0.0",
+        "PIL": "Pillow>=10.0.0",
+    }
+
+    for modulo, paquete in paquetes.items():
+
+        if importlib.util.find_spec(modulo) is None:
+
+            print(f"⚠️ Falta {modulo}. Instalando...")
+
+            subprocess.check_call(
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--upgrade",
+                    paquete,
+                ]
+            )
+
+
+asegurar_dependencias()
+
 # BASA SUPERSISTEMA V27 - FIX NameError Linea 31 - Autonomia Corregida
 import streamlit as st
 import importlib.util
