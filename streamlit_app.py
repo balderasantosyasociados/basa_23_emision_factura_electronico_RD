@@ -150,23 +150,17 @@ if st.session_state.user is None:
             if entrar:
                 conn = get_conn()
                 row = None
-                # Intento 1: Login viejo - RNC/Cedula/Correo
                 row = conn.execute("SELECT * FROM usuarios WHERE rnc=? OR cedula=? OR correo=?", (identificador, identificador, identificador)).fetchone()
-                # Intento 2: Login DGII - RNC Empresa + Delegado
-# FIX: Si el usuario pone el mismo RNC en los 2 campos como dueño, ignorar el segundo campo
-if not row and identificador2 and identificador2.strip() != identificador.strip():
-    row = conn.execute("SELECT * FROM usuarios WHERE rnc=? AND (cedula=? OR cedula_rep=?)", (identificador, identificador2, identificador2)).fetchone()
-# FIX BASA: Si es BASA 133378711, auto-asigna roles aunque sea usuario viejo sin roles
-if row and str(row["rnc"]) == "133378711":
-    try:
-        conn.execute("UPDATE usuarios SET estado='APROBADO', rol_admin=1, rol_solicitante=1, rol_firmante=1, rol_aprobador=1 WHERE rnc='133378711'")
-        conn.commit()
-    except Exception:
-        pass
-                       
+                if not row and identificador2 and identificador2.strip() != identificador.strip():
+                    row = conn.execute("SELECT * FROM usuarios WHERE rnc=? AND (cedula=? OR cedula_rep=?)", (identificador, identificador2, identificador2)).fetchone()
+                if row and str(row["rnc"]) == "133378711":
+                    try:
+                        conn.execute("UPDATE usuarios SET estado='APROBADO', rol_admin=1, rol_solicitante=1, rol_firmante=1, rol_aprobador=1 WHERE rnc='133378711'")
+                        conn.commit()
+                    except Exception:
+                        pass
                 conn.close()
                 if row and row["clave_hash"] == hash_clave(clave):
-                    # Si es PENDIENTE, no entra hasta que BASA apruebe
                     estado = row["estado"] if "estado" in row.keys() and row["estado"] else "APROBADO"
                     if estado == "PENDIENTE":
                         st.warning("Tu solicitud está PENDIENTE. BASA debe aprobarte y asignarte roles. Contacta a BASA.")
