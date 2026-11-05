@@ -1,8 +1,5 @@
-# =========================================================
 # BASA SUPERSISTEMA V27 - REQUISITOS UNIVERSALES
-# Para TODOS los desarrollos BASA - Con Autonomía IA
-# Mantener este archivo igual en todos los proyectos
-# =========================================================
+# Para TODOS los desarrollos BASA
 
 # --- Frontend & Visualización Web ---
 streamlit>=1.40.0
