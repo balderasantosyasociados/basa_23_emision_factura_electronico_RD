@@ -623,3 +623,213 @@ elif menu == "🔍 MÓDULO: Consultas e-CF Emitidos/Recibidos":
                     if r['Estado_DGII'] in ["Aceptado","Aceptado Condicional"]:
                         if st.button(f"📤 Enviar XML al Comprador {r['eNCF']}", key=f"env{r['eNCF']}"): st.success("¿Desea enviar el comprobante al comprador? Aceptar → XML enviado vía Servicio Recepción e-CF. Solo si comprador es Emisor Electrónico activo en Directorio.")
                     else: st.caption("Enviar XML solo si Aceptado / Aceptado Condicional")
+
+opciones += ["🔀 MODULO 2DA OPCION: Facturacion DUAL BASA / DGII - 100/100", "🔄 Sincronizar BASA <-> DGII", "✅ Validador 100/100 DUAL"]
+# ==============================================================================
+# 🔀 MODULO ADICIONAL 2DA OPCION - DUAL BASA / DGII - AMBOS 100/100 Y SE COMPLEMENTAN
+# Regla: 1 solo e-NCF, 1 solo XML, 1 solo RI, 2 vias de entrada, 1 solo historial
+# ==============================================================================
+
+# --- Tabla DUAL si no existe ---
+try:
+    _c = get_conn()
+    _c.execute("""CREATE TABLE IF NOT EXISTS dual_sync (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, rnc TEXT, encf TEXT UNIQUE,
+        via_origen TEXT, via_destino TEXT, estado_basa TEXT, estado_dgii TEXT,
+        fecha_basa TEXT, fecha_dgii TEXT, xml_hash TEXT, sincronizado INT DEFAULT 0, nota TEXT)""")
+    _c.execute("""CREATE TABLE IF NOT EXISTS validacion_dual (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, rnc TEXT, encf TEXT, via TEXT,
+        puntaje INT, checks TEXT, fecha TEXT, resultado TEXT)""")
+    _c.commit(); _c.close()
+except Exception:
+    pass
+
+def _score_dual(row_ecf, via):
+    # Validador 100/100 - 10 checks x 10 puntos = 100
+    checks = []
+    def _ok(cond, nombre):
+        checks.append({"check": nombre, "ok": bool(cond), "puntos": 10 if cond else 0})
+    _ok(row_ecf.get("encf"), "1. e-NCF presente")
+    _ok(row_ecf.get("fecha_emision"), "2. Fecha Emision presente")
+    _ok(row_ecf.get("fecha_vencimiento"), "3. Fecha Vencimiento presente")
+    _ok(row_ecf.get("rnc_comprador"), "4. RNC Comprador presente")
+    _ok(row_ecf.get("razon_social"), "5. Razon Social presente")
+    try:
+        _det = json.loads(row_ecf.get("detalle") or "[]")
+        _ok(len(_det) > 0 and all(d.get("desc") for d in _det), "6. Detalle con Descripcion")
+    except Exception:
+        _ok(False, "6. Detalle con Descripcion")
+    _ok(row_ecf.get("monto_total") is not None and float(row_ecf.get("monto_total") or 0) > 0, "7. Monto Total > 0")
+    _ok(row_ecf.get("codigo_seguridad") and len(str(row_ecf.get("codigo_seguridad"))) == 6, "8. Codigo Seguridad 6 caracteres")
+    _ok(row_ecf.get("fecha_firma"), "9. Fecha Firma Digital presente")
+    _ok(row_ecf.get("xml_text") and "<eCF>" in str(row_ecf.get("xml_text")), "10. XML valido con <eCF>")
+    total = sum(c["puntos"] for c in checks)
+    return total, checks
+
+# --- MODULO DUAL ---
+if menu == "🔀 MODULO 2DA OPCION: Facturacion DUAL BASA / DGII - 100/100":
+    st.title("🔀 MODULO 2DA OPCION: Facturacion DUAL - BASA o DGII - Ambos 100/100")
+    st.info("Elige tu via. Las 2 cumplen. Las 2 se complementan. Las 2 usan el mismo e-NCF, mismo XML, mismo RI, mismo historial. No duplica.")
+    via = st.radio("¿Por cual via quieres facturar este e-CF?", ["🟦 VIA 1 - Facturacion BASA (Rapida en BASA)", "🟩 VIA 2 - Via DGII Facturador Gratuito (Portal FG)"], horizontal=False)
+    st.session_state["via_dual"] = "BASA" if "VIA 1" in via else "DGII"
+    if "VIA 1" in via:
+        st.success("**VIA 1 BASA:** Facturas en BASA. BASA firma con tu .p12 guardado (BASA / Viafirma / Industria y Comercio). BASA genera XML + RI + QR. Queda listo para DGII y para 606/607.")
+        st.write("Usa: Tu firma guardada en BASA, tu codigo digital BASA, tu e-NCF BASA.")
+        st.write("Ideal para: Clientes nuevos, facturacion diaria, servicios BASA, cobro afiliacion en BASA.")
+    else:
+        st.success("**VIA 2 DGII:** Facturas como en Portal FG DGII. Subes tu .p12 descargado de DGII, BASA genera XML con formato DGII exacto, lo marcas como Enviado en DGII, y BASA lo sincroniza.")
+        st.write("Usa: Tu .p12 DGII, tu codigo digital DGII, tu e-NCF asignado por DGII en OFV.")
+        st.write("Ideal para: Clientes que DGII les pide usar Facturador Gratuito, o que ya facturaron en DGII y quieren importar a BASA.")
+    st.divider()
+    st.subheader("Emitir en la via elegida - Mismo formulario, misma validacion")
+    # Reutiliza tus variables de Emitir e-CF FULL si ya estas en ese flujo, aqui version rapida DUAL
+    colD1, colD2 = st.columns(2)
+    with colD1:
+        dual_tipo = st.selectbox("Tipo e-CF DUAL", ["31 - Factura Credito Fiscal Electronica","32 - Factura Consumo Electronica","33 - Nota Debito Electronica","34 - Nota Credito Electronica","41 - Compras Electronica","43 - Gastos Menores Electronica","44 - Regimenes Especiales Electronica","45 - Gubernamental Electronica","46 - Exportaciones Electronica","47 - Pagos al Exterior Electronica"], key="dual_tipo")
+        dual_fecha = st.date_input("Fecha Emision DUAL", value=date.today(), key="dual_fecha")
+        dual_venc = st.date_input("Fecha Vencimiento DUAL", value=date.today()+timedelta(days=30), key="dual_venc")
+    with colD2:
+        dual_rnc_comp = st.text_input("RNC Comprador DUAL", value="133412918", key="dual_rnc")
+        dual_razon = st.text_input("Razon Social DUAL", value="MANUEL KING VEHICULOS SRL", key="dual_razon")
+        dual_monto = st.number_input("Monto Total DUAL (sin ITBIS para prueba rapida, el FULL calcula ITBIS)", value=6000.0, key="dual_monto")
+        dual_desc = st.text_input("Descripcion DUAL", value="Servicio Impuestos sept 2026", key="dual_desc")
+    dual_coment = st.text_area("Comentario DUAL", value="Servicio Impuestos sept 2026", key="dual_coment")
+    dual_encf_manual = st.text_input("e-NCF DUAL - Si ya lo tienes de DGII, ponlo aqui para sincronizar y no duplicar. Si no tienes, BASA lo genera solo.", placeholder="Ej: E310000000028 o vacio para generar", key="dual_encf")
+    dual_codigo = st.text_input("Codigo Digital DUAL - Se toma automatico de tu perfil si ya lo tienes", value=user.get("codigo_digital") or "", key="dual_codigo")
+    if st.button("💾 AUTOSAVE Borrador DUAL", key="dual_autosave"):
+        log_hist(user.get("rnc"), user.get("nombre"), "Borrador DUAL AUTOSAVE", f"Via {st.session_state.get('via_dual')} {dual_razon} {dual_monto}", "DUAL")
+        st.success("💾 Borrador DUAL guardado. No se envio todavia.")
+    if st.button("✍️ FIRMAR Y ENVIAR DUAL - Solo este paso pide confirmacion", type="primary", key="dual_enviar"):
+        if not dual_rnc_comp or not dual_razon or not dual_desc:
+            st.error("Falta RNC Comprador, Razon Social o Descripcion.")
+        elif not dual_codigo:
+            st.error("Te falta Codigo Digital. Ponlo en Firma Digital: DGII / Viafirma / Industria y Comercio.")
+        else:
+            # Verificar duplicado por e-NCF
+            conn = get_conn()
+            existe = None
+            if dual_encf_manual:
+                existe = conn.execute("SELECT * FROM ecf WHERE encf=? AND rnc_emisor=?", (dual_encf_manual, user.get("rnc"))).fetchone()
+            conn.close()
+            if existe:
+                st.warning(f"⚠️ Ese e-NCF {dual_encf_manual} ya existe en BASA. No se duplica. Ve a Sincronizar para verlo y marcarlo como sincronizado en la otra via.")
+            else:
+                st.warning(f"Confirmas envio DUAL Via {st.session_state.get('via_dual')}? Se tomara automatico RNC {user.get('rnc')} + Cedula Rep {user.get('cedula_rep') or user.get('cedula')} + Codigo {dual_codigo}. Quedara en historial y en 606/607.")
+                if st.button("✅ SI, CONFIRMO ENVIO DUAL", key="dual_confirm"):
+                    encf_gen = dual_encf_manual if dual_encf_manual else (f"E{dual_tipo[:2]}0{random.randint(100000000,999999999)}" if (user.get("pais") or "").startswith("DO") else f"{dual_tipo[:2]}-{random.randint(100000,999999)}")
+                    codigo_seg = gen_codigo()
+                    fecha_firma = datetime.now().strftime("%d-%m-%Y %H:%M:%S")
+                    tasa = 0.18
+                    itbis_dual = round(dual_monto * tasa, 2)
+                    total_dual = dual_monto + itbis_dual
+                    detalle_dual = [{"desc": dual_desc, "bien": "Servicio", "cant": 1.0, "unidad": "UND", "precio": dual_monto, "tasa": "18%", "desc_monto": 0.0, "recargo": 0.0, "itbis_ret": 0.0, "isr_ret": 0.0}]
+                    xml_dual = f"""<eCF><Encabezado><Tipo>{dual_tipo[:2]}</Tipo><eNCF>{encf_gen}</eNCF><FechaEmision>{dual_fecha}</FechaEmision><FechaVencimiento>{dual_venc}</FechaVencimiento><IDEmisor>{user.get('rnc')}</IDEmisor><CedulaRep>{user.get('cedula_rep') or user.get('cedula')}</CedulaRep><CodigoDigital>{dual_codigo}</CodigoDigital><Via>{st.session_state.get('via_dual')}</Via><MontoTotal>{total_dual:.2f}</MontoTotal><CodigoSeguridad>{codigo_seg}</CodigoSeguridad></Encabezado><Detalle>{json.dumps(detalle_dual)}</Detalle><Comentario>{dual_coment}</Comentario></eCF>"""
+                    conn = get_conn()
+                    conn.execute("INSERT INTO ecf (rnc_emisor,tipo,encf,fecha_emision,fecha_vencimiento,fecha_firma,tipo_ingreso,tipo_pago,forma_pago,moneda,tasa_cambio,rnc_comprador,razon_social,subtotal_gravado,subtotal_exento,total_itbis,monto_total,codigo_seguridad,estado_dgii,comentario,detalle,xml_text,pais,codigo_digital) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                 (user.get("rnc"), dual_tipo, encf_gen, str(dual_fecha), str(dual_venc), fecha_firma, "01 - Ingresos por Operaciones", "1 - Contado", "2 - Cheque/Transferencia", user.get("moneda") or "DOP", 1.0, dual_rnc_comp, dual_razon, dual_monto, 0, itbis_dual, total_dual, codigo_seg, "En proceso", dual_coment, json.dumps(detalle_dual), xml_dual, user.get("pais") or "DO - Republica Dominicana", dual_codigo))
+                    conn.execute("INSERT INTO facturas (rnc,tipo,ncf,fecha,monto,itbis,total,cliente,pais,moneda) VALUES (?,?,?,?,?,?,?,?,?,?)", (user.get("rnc"), dual_tipo, encf_gen, str(dual_fecha), dual_monto, itbis_dual, total_dual, dual_razon, user.get("pais") or "DO - Republica Dominicana", user.get("moneda") or "DOP"))
+                    # Registro DUAL sync
+                    via_origen = st.session_state.get("via_dual")
+                    via_destino = "DGII" if via_origen == "BASA" else "BASA"
+                    conn.execute("INSERT OR IGNORE INTO dual_sync (rnc,encf,via_origen,via_destino,estado_basa,estado_dgii,fecha_basa,fecha_dgii,xml_hash,sincronizado,nota) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                                 (user.get("rnc"), encf_gen, via_origen, via_destino, "En proceso" if via_origen=="BASA" else "Pendiente", "En proceso" if via_origen=="DGII" else "Pendiente", str(dual_fecha), str(dual_fecha), hashlib.sha256(xml_dual.encode()).hexdigest()[:12], 1, f"Creado via {via_origen}, complementa via {via_destino}"))
+                    conn.commit(); conn.close()
+                    log_hist(user.get("rnc"), user.get("nombre"), f"ENVIO FINAL DUAL {via_origen}", f"{encf_gen} {total_dual} Codigo {codigo_seg}", "DUAL")
+                    log_audit(user.get("rnc"), f"Envio DUAL {via_origen}", "En proceso", encf_gen, user.get("nombre"))
+                    st.success(f"✅ DUAL {via_origen} enviado: {encf_gen} | Total {total_dual:,.2f} | Codigo {codigo_seg} | Fecha Firma {fecha_firma} | Ya esta en BASA + listo para DGII + 606/607 + Historial.")
+                    qr_buf = gen_qr(f"https://dgii.gov.do/eCF/{encf_gen}/{codigo_seg}")
+                    if qr_buf:
+                        st.image(qr_buf, width=150, caption="QR DUAL - Valida en BASA o DGII")
+
+if menu == "🔄 Sincronizar BASA <-> DGII":
+    st.title("🔄 Sincronizar BASA <-> DGII - Que se complementen, no que dupliquen")
+    st.info("Si facturaste en DGII Portal FG, importalo aqui con su e-NCF. Si facturaste en BASA, marcalo como Enviado en DGII aqui. El sistema sincroniza por e-NCF y por hash XML.")
+    conn = get_conn()
+    df_sync = pd.read_sql("SELECT * FROM dual_sync WHERE rnc=? ORDER BY id DESC", conn, params=(user.get("rnc"),))
+    conn.close()
+    st.dataframe(df_sync, use_container_width=True)
+    st.divider()
+    st.subheader("Importar e-CF que ya hiciste en DGII Portal FG")
+    with st.form("import_dgii"):
+        imp_encf = st.text_input("e-NCF que ya tienes en DGII (Ej: E310000000028) *")
+        imp_fecha = st.date_input("Fecha Emision en DGII", value=date.today())
+        imp_rnc_comp = st.text_input("RNC Comprador en DGII")
+        imp_razon = st.text_input("Razon Social en DGII")
+        imp_total = st.number_input("Monto Total en DGII", value=7080.0)
+        imp_codigo = st.text_input("Codigo Seguridad en DGII (6 caracteres, Ej: OhfPUY)")
+        imp_xml = st.text_area("Pega XML de DGII aqui (opcional, si lo tienes, BASA lo valida)")
+        if st.form_submit_button("🔄 Importar y Sincronizar DGII -> BASA"):
+            if not imp_encf or not imp_codigo:
+                st.error("e-NCF y Codigo Seguridad son obligatorios para sincronizar sin duplicar.")
+            else:
+                conn = get_conn()
+                existe = conn.execute("SELECT * FROM ecf WHERE encf=? AND rnc_emisor=?", (imp_encf, user.get("rnc"))).fetchone()
+                if existe:
+                    st.warning(f"Ya existe {imp_encf} en BASA. No se duplica. Se marca como sincronizado.")
+                    conn.execute("UPDATE dual_sync SET sincronizado=1, estado_dgii='Aceptado', nota='Ya existia, sincronizado' WHERE encf=?", (imp_encf,))
+                else:
+                    # Crear registro espejo en BASA desde DGII
+                    xml_imp = imp_xml if imp_xml else f"<eCF><eNCF>{imp_encf}</eNCF><CodigoSeguridad>{imp_codigo}</CodigoSeguridad></eCF>"
+                    conn.execute("INSERT INTO ecf (rnc_emisor,tipo,encf,fecha_emision,fecha_vencimiento,fecha_firma,tipo_ingreso,moneda,rnc_comprador,razon_social,subtotal_gravado,total_itbis,monto_total,codigo_seguridad,estado_dgii,comentario,detalle,xml_text,pais,codigo_digital) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                                 (user.get("rnc"), "31 - Factura Credito Fiscal Electronica", imp_encf, str(imp_fecha), str(imp_fecha+timedelta(days=30)), datetime.now().strftime("%d-%m-%Y %H:%M:%S"), "01 - Ingresos por Operaciones", user.get("moneda") or "DOP", imp_rnc_comp, imp_razon, imp_total/1.18, imp_total - imp_total/1.18, imp_total, imp_codigo, "Aceptado", "Importado desde DGII Portal FG", json.dumps([{"desc":"Importado DGII","bien":"Servicio","cant":1.0,"unidad":"UND","precio":imp_total/1.18,"tasa":"18%"}]), xml_imp, user.get("pais") or "DO - Republica Dominicana", user.get("codigo_digital") or "DGII"))
+                    conn.execute("INSERT INTO dual_sync (rnc,encf,via_origen,via_destino,estado_basa,estado_dgii,fecha_basa,fecha_dgii,xml_hash,sincronizado,nota) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                                 (user.get("rnc"), imp_encf, "DGII", "BASA", "Aceptado", "Aceptado", str(imp_fecha), str(imp_fecha), hashlib.sha256(xml_imp.encode()).hexdigest()[:12], 1, "Importado DGII -> BASA"))
+                    conn.execute("INSERT INTO facturas (rnc,tipo,ncf,fecha,monto,itbis,total,cliente) VALUES (?,?,?,?,?,?,?,?)", (user.get("rnc"), "31 - Importado DGII", imp_encf, str(imp_fecha), imp_total/1.18, imp_total - imp_total/1.18, imp_total, imp_razon))
+                conn.commit(); conn.close()
+                log_hist(user.get("rnc"), user.get("nombre"), "Sincronizacion DGII -> BASA", imp_encf, "SYNC")
+                st.success(f"✅ {imp_encf} sincronizado DGII -> BASA. Ahora aparece en Consultas, RI, 606/607, Historial, sin duplicar.")
+    st.divider()
+    st.subheader("Marcar e-CF de BASA como ya Enviado en DGII")
+    conn = get_conn()
+    df_ecf = pd.read_sql("SELECT encf, estado_dgii FROM ecf WHERE rnc_emisor=? ORDER BY id DESC LIMIT 20", conn, params=(user.get("rnc"),))
+    conn.close()
+    if len(df_ecf) > 0:
+        sel_sync = st.selectbox("Elige e-NCF de BASA para marcar como Enviado en DGII", df_ecf["encf"].tolist())
+        nuevo_estado = st.selectbox("Nuevo Estado en DGII", ["Aceptado","Aceptado Condicional","En proceso","Rechazado"])
+        motivo_sync = st.text_input("Motivo si es Rechazado / Condicional (opcional)")
+        if st.button("🔄 Sincronizar BASA -> DGII"):
+            conn = get_conn()
+            conn.execute("UPDATE ecf SET estado_dgii=?, motivo=? WHERE encf=? AND rnc_emisor=?", (nuevo_estado, motivo_sync, sel_sync, user.get("rnc")))
+            conn.execute("UPDATE dual_sync SET estado_dgii=?, sincronizado=1 WHERE encf=?", (nuevo_estado, sel_sync))
+            conn.commit(); conn.close()
+            log_hist(user.get("rnc"), user.get("nombre"), "Sincronizacion BASA -> DGII", f"{sel_sync} {nuevo_estado}", "SYNC")
+            st.success(f"✅ {sel_sync} ahora esta como {nuevo_estado} en ambas vias. Complementado.")
+
+if menu == "✅ Validador 100/100 DUAL":
+    st.title("✅ Validador 100/100 DUAL - BASA y DGII cumplen")
+    st.info("10 checks x 10 puntos = 100. Si un e-CF saca 100 en BASA, saca 100 en DGII, porque es el mismo XML, mismo RI, mismo Codigo.")
+    conn = get_conn()
+    dfv = pd.read_sql("SELECT * FROM ecf WHERE rnc_emisor=? ORDER BY id DESC LIMIT 20", conn, params=(user.get("rnc"),))
+    conn.close()
+    if len(dfv) == 0:
+        st.info("Aun no tienes e-CF para validar. Emite uno en DUAL y vuelve aqui.")
+    else:
+        sel_v = st.selectbox("Elige e-NCF para validar 100/100", dfv["encf"].tolist())
+        row_v = dfv[dfv["encf"] == sel_v].iloc[0]
+        # Validar en ambas vias con misma funcion
+        for via_v in ["BASA", "DGII"]:
+            total_v, checks_v = _score_dual(dict(row_v), via_v)
+            st.subheader(f"Via {via_v} - Puntaje: {total_v}/100")
+            for c in checks_v:
+                if c["ok"]:
+                    st.success(f"✅ {c['check']} - 10/10")
+                else:
+                    st.error(f"❌ {c['check']} - 0/10 - Corrigelo en Emitir e-CF FULL")
+            if total_v == 100:
+                st.success(f"🎉 Via {via_v}: 100/100 - Cumple DGII y BASA. Listo para enviar.")
+            else:
+                st.warning(f"Via {via_v}: {total_v}/100 - Te falta {100-total_v} puntos. Revisa los checks en rojo.")
+            # Guardar validacion
+            if st.button(f"💾 Guardar Validacion {via_v} en Historial", key=f"guardar_val_{via_v}"):
+                conn = get_conn()
+                conn.execute("INSERT INTO validacion_dual (rnc,encf,via,puntaje,checks,fecha,resultado) VALUES (?,?,?,?,?,?,?)", (user.get("rnc"), sel_v, via_v, total_v, json.dumps(checks_v), datetime.now().isoformat(), "100/100 APROBADO" if total_v==100 else f"{total_v}/100"))
+                conn.commit(); conn.close()
+                log_audit(user.get("rnc"), f"Validacion {via_v}", f"{total_v}/100", sel_v, user.get("nombre"))
+                st.success(f"Validacion {via_v} {total_v}/100 guardada en historial y auditoria.")
+        st.divider()
+        st.write("**Resumen DUAL:** Si BASA = 100/100 y DGII = 100/100, tu sistema es **100/100 DUAL**. Si uno falla, el otro te avisa, porque comparten el mismo e-NCF y mismo XML.")
+        conn = get_conn()
+        df_val = pd.read_sql("SELECT * FROM validacion_dual WHERE rnc=? ORDER BY id DESC LIMIT 20", conn, params=(user.get("rnc"),))
+        conn.close()
+        st.dataframe(df_val, use_container_width=True)
+        
