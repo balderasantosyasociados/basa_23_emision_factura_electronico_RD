@@ -1,0 +1,25 @@
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+basa_api = FastAPI(
+    title="BASA SUPERSISTEMA V27 API",
+    version="27.0"
+)
+
+class BasaHealth(BaseModel):
+    sistema: str
+    version: str
+    estado: str
+    componentes: int
+    faltantes: int
+
+
+@basa_api.get("/health", response_model=BasaHealth)
+def health():
+    return BasaHealth(
+        sistema="BASA SUPERSISTEMA",
+        version="27",
+        estado="FULL",
+        componentes=15,
+        faltantes=0
+    )
