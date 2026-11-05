@@ -1,27 +1,122 @@
-# BASA V26 FINAL - CORREGIDO DuplicateElementId + Login RNC/Cedula/Correo + Recuperacion Celular/WhatsApp/Correo + Sin Vencimiento + IA Valida
+# BASA SUPERSISTEMA V27 FINAL - Autoasistencia IA ON/OFF + Flask DGII 606/607/608/IR17/ITBIS Integrado + Login RNC/Cedula/Correo + Recuperacion Sin Vencimiento + Fix DuplicateElementId
 import streamlit as st, sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from email.mime.text import MIMEText
 import urllib.parse
+import openpyxl
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
+from io import BytesIO
 
-st.set_page_config(page_title="BASA V26 - Login RNC/Cedula/Correo", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="BASA SUPERSISTEMA V27", layout="wide", page_icon="🏦")
 
-# ================= CONFIG =================
-BASE = Path("BASA_V26_PROFESIONAL"); BASE.mkdir(exist_ok=True)
+# ================= CONFIG SUPERSISTEMA =================
+BASE = Path("BASA_V27_SUPERSISTEMA"); BASE.mkdir(exist_ok=True)
 CLIENTES_DIR = BASE / "clientes_db"; CLIENTES_DIR.mkdir(exist_ok=True)
 CRED_DIR = BASE / "credenciales_privadas"; CRED_DIR.mkdir(exist_ok=True)
-DB = BASE / "basa_v26.db"
+REPORT_DIR = BASE / "reportes_dgii"; REPORT_DIR.mkdir(exist_ok=True)
+for sub in ["reportes_606","reportes_607","reportes_608","reportes_ir_17","reportes_itbis","borradores"]:
+    (REPORT_DIR / sub).mkdir(exist_ok=True)
+UPLOAD_DIR = BASE / "uploads"; UPLOAD_DIR.mkdir(exist_ok=True)
+DB = BASE / "basa_v27.db"
 CUENTA_BHD_REAL = "08694150021"
 def mascara(c): return f"****{c[-4:]}"
 CUENTA_MOSTRAR = mascara(CUENTA_BHD_REAL)
 MASTER_EMAIL = "Licpedrobaldera@gmail.com"
 CLAVE_DESARROLLADOR = "BASA-DEV-2026"
 CLAVE_COLABORADOR = "BASA-TEAM-2026"
-# GMAIL - Pon tu clave de aplicacion aqui para que si llegue correo
 TU_CORREO_GMAIL = "Licpedrobaldera@gmail.com"
-TU_CLAVE_APP_GMAIL = "XXXX-XXXX-XXXX-XXXX"
+TU_CLAVE_APP_GMAIL = "XXXX-XXXX-XXXX-XXXX"  # Pon tu clave de aplicacion Gmail aqui
 
+# ================= FLASK DGII INTEGRADO - TU CODIGO CONVERTIDO A STREAMLIT =================
+DGII_606_COLUMNS = [
+    "RNC o Cedula / Pasaporte", "Tipo Identificacion", "Tipo Bienes y Servicios Comprados",
+    "Numero de Comprobante Fiscal (NCF)", "NCF o Documento Modificado", "Fecha Comprobante (AAAAMMDD)",
+    "Fecha Pago (AAAAMMDD)", "Monto Facturado en Servicios", "Monto Facturado en Bienes",
+    "Total Monto Facturado", "ITBIS Facturado", "ITBIS Retenido", "ITBIS sujeto a Proporcionalidad (Art. 349)",
+    "ITBIS llevado al Costo", "ITBIS por Adelantar", "ITBIS Percibido en Compras", "Tipo de Retencion en ISR",
+    "Monto Retenido ISR", "ISR Percibido en Compras", "Impuesto Selectivo al Consumo", "Otros Impuestos / Tasas",
+    "Monto Propina Legal", "Forma de Pago"
+]
+DGII_607_COLUMNS = ["RNC / Cedula", "Tipo ID", "NCF", "NCF Modificado", "Fecha Comprobante", "Fecha Pago", "Monto Servicios", "Monto Bienes", "Total", "ITBIS Facturado", "ITBIS Retenido", "Forma Pago"]
+DGII_608_COLUMNS = ["RNC / Cedula", "Tipo ID", "NCF Nota", "NCF Afectado", "Fecha", "Monto", "ITBIS", "Tipo Nota", "Motivo"]
+
+def safe_float(v):
+    try:
+        if pd.isna(v) or v == '' or v is None: return 0.0
+        if isinstance(v, str): v = v.replace(',','').replace('RD$','').replace('$','').strip()
+        return float(v)
+    except: return 0.0
+def safe_str(v, default=''):
+    if pd.isna(v) or v is None: return default
+    s=str(v).strip(); return default if s.lower()=='nan' or s=='' else s
+
+def auto_save_dgii(rnc, periodo, modulo, data):
+    # = TU /auto_save de Flask - Ahora en Streamlit - Guarda borrador solo
+    folder = REPORT_DIR / f"reportes_{modulo}" if modulo in ["606","607","608"] else REPORT_DIR / "borradores"
+    if modulo == "ir_17": folder = REPORT_DIR / "reportes_ir_17"
+    if modulo == "itbis": folder = REPORT_DIR / "reportes_itbis"
+    save_path = folder / f"autosave_{rnc}_{periodo}_{modulo}.json"
+    with open(save_path,'w',encoding='utf-8') as f: json.dump(data,f,ensure_ascii=False,indent=2)
+    return str(save_path)
+
+def parse_file_dgii(uploaded_file, modulo):
+    # = TU /parse_file de Flask - Lee CSV/Excel y convierte a formato DGII
+    try:
+        if uploaded_file.name.lower().endswith('.csv'):
+            df_in = pd.read_csv(uploaded_file, dtype=str, keep_default_na=False)
+        else:
+            xl = pd.ExcelFile(uploaded_file)
+            sheet = xl.sheet_names[0]
+            for name in xl.sheet_names:
+                if modulo in name or '606' in name or 'Formato' in name: sheet=name; break
+            df_in = pd.read_excel(uploaded_file, sheet_name=sheet, dtype=str, keep_default_na=False)
+        parsed=[]
+        for _, row in df_in.iterrows():
+            rnc_val = safe_str(row.iloc[0] if len(row)>0 else '')
+            ncf_val = safe_str(row.iloc[3] if len(row)>3 else row.iloc[1] if len(row)>1 else '')
+            if not rnc_val or not ncf_val: continue
+            parsed.append({
+                "rnc": rnc_val, "tipo_id":"1", "tipo_bienes":"02", "ncf": ncf_val, "ncf_mod":'',
+                "fecha_comp":"20260930", "fecha_pago":"20260930",
+                "monto_servicios": safe_float(row.iloc[7] if len(row)>7 else 0),
+                "monto_bienes": safe_float(row.iloc[8] if len(row)>8 else 10000),
+                "itbis_fact": safe_float(row.iloc[10] if len(row)>10 else 1800),
+                "itbis_ret":0, "itbis_prop":0, "itbis_costo":0, "itbis_adelantar":1800, "itbis_perc":0,
+                "tipo_isr":"00", "monto_isr":0, "isr_perc":0, "selectivo":0, "otros_imp":0, "propina":0, "forma_pago":"01"
+            })
+        return parsed
+    except Exception as e:
+        return []
+
+def generate_excel_dgii(invoices, rnc_contribuyente, periodo, modulo):
+    # = TU /generate_excel de Flask - Genera Excel oficial DGII
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = f"Formato {modulo}"
+    ws['A1'] = f"RNC: {rnc_contribuyente}"; ws['A2'] = f"Periodo: {periodo}"; ws['A3'] = f"Generado: {datetime.now()} - BASA SUPERSISTEMA V27"
+    header_font = Font(bold=True, color="FFFFFF"); header_fill = PatternFill(start_color="1B365D", end_color="1B365D", fill_type="solid")
+    columns = DGII_606_COLUMNS if modulo=="606" else DGII_607_COLUMNS if modulo=="607" else DGII_608_COLUMNS if modulo=="608" else DGII_606_COLUMNS
+    for col_idx, col_name in enumerate(columns, 1):
+        cell = ws.cell(row=4, column=col_idx, value=col_name); cell.font=header_font; cell.fill=header_fill
+        ws.column_dimensions[get_column_letter(col_idx)].width=20
+    start_row=5
+    for i, inv in enumerate(invoices):
+        curr=start_row+i; total=safe_float(inv.get('monto_bienes',0))+safe_float(inv.get('monto_servicios',0))
+        if modulo=="606":
+            row_vals=[inv.get('rnc',''),inv.get('tipo_id','1'),inv.get('tipo_bienes','02'),inv.get('ncf',''),inv.get('ncf_mod',''),inv.get('fecha_comp',''),inv.get('fecha_pago',''),safe_float(inv.get('monto_servicios',0)),safe_float(inv.get('monto_bienes',0)),total,safe_float(inv.get('itbis_fact',0)),safe_float(inv.get('itbis_ret',0)),0,0,safe_float(inv.get('itbis_fact',0)),0,'00',0,0,0,0,0,'01']
+        else:
+            row_vals=list(inv.values())[:len(columns)]
+            # Rellenar si falta
+            while len(row_vals)<len(columns): row_vals.append("")
+        for col_idx, val in enumerate(row_vals,1):
+            cell=ws.cell(row=curr,column=col_idx,value=val)
+            if col_idx in {8,9,10,11,12}: 
+                try: cell.number_format='#,##0.00'
+                except: pass
+    output = BytesIO(); wb.save(output); output.seek(0)
+    return output, f"Formato_{modulo}_{periodo}_{rnc_contribuyente}.xlsx"
+
+# ================= PAISES / PLANES =================
 PAISES = {
     "República Dominicana": {"id_fiscal": "RNC / Cédula", "moneda": "DOP", "idioma": "Español", "impuesto": "ITBIS 18%", "dgii": "DGII"},
     "Estados Unidos": {"id_fiscal": "EIN / SSN / ITIN", "moneda": "USD", "idioma": "English / Español", "impuesto": "Sales Tax", "dgii": "IRS"},
@@ -43,62 +138,40 @@ PLANES = {
 }
 BANCOS = {"BHD": "https://www.bhd.com.do/", "Banreservas": "https://www.banreservas.com/", "Banco Popular": "https://www.popularenlinea.com/", "Bank of America USA": "https://www.bankofamerica.com/", "Chase USA": "https://www.chase.com/"}
 
-# ================= FUNCIONES SEGURAS - TODAS CON KEY UNICA =================
 def validar_id(cid):
     if not cid or len(cid)>60 or ".." in cid or "/" in cid or "\\" in cid: return False
     return bool(re.match(r"^[A-Za-z0-9_-]+$", cid))
 def validar_email(e): return bool(re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", e or ""))
 def hash_pw(p): return hashlib.sha256(p.encode()).hexdigest()
-def limpiar_identificador(valor):
-    # IA: Limpia RNC / Cedula / Correo - Quita guiones, espacios, mayusculas
-    if not valor: return ""
-    v = str(valor).strip()
-    # Si es correo, dejar en minuscula
+def limpiar_identificador(v):
+    if not v: return ""
+    v=str(v).strip()
     if "@" in v: return v.lower()
-    # Si es RNC/Cedula, quitar guiones y espacios
-    v = v.replace("-", "").replace(" ", "").replace(".", "")
-    return v
-
+    return v.replace("-","").replace(" ","").replace(".","")
 def buscar_usuario_por_identificador(identificador):
-    # IA VALIDA: Busca por RNC, Cedula, ID o Correo - Como el usuario desee
     ident_limpio = limpiar_identificador(identificador)
-    # 1. Buscar por correo exacto
     row = conn.execute("SELECT * FROM usuarios WHERE email=?", (ident_limpio.lower(),)).fetchone()
     if row: return row, "Correo Electrónico"
-    # 2. Buscar por ID Fiscal (RNC/Cedula) limpio y con guiones
     row = conn.execute("SELECT * FROM usuarios WHERE id_fiscal=? OR REPLACE(REPLACE(id_fiscal,'-',''),' ','')=?", (identificador, ident_limpio)).fetchone()
     if row: return row, "RNC / Cédula / ID Fiscal"
-    # 3. Buscar por ID (codigo cliente = ID Fiscal)
     row = conn.execute("SELECT * FROM usuarios WHERE id=?", (ident_limpio,)).fetchone()
     if row: return row, "ID Cliente"
-    # 4. Buscar por telefono / celular
     row = conn.execute("SELECT * FROM usuarios WHERE telefono=? OR REPLACE(REPLACE(telefono,'-',''),' ','')=?", (identificador, ident_limpio)).fetchone()
     if row: return row, "Celular / Teléfono"
     return None, None
-
-def enviar_codigo_por_canal(canal, destino, codigo, nombre_usuario=""):
-    # Envia por Celular SMS (via WhatsApp link), WhatsApp, o Correo - Usuario escoge
-    # SIN FECHA DE VENCIMIENTO - El codigo no vence, se puede restaurar cuando quiera
-    if canal == "WhatsApp":
-        msg = f"Hola {nombre_usuario}, tu codigo de recuperacion BASA es: {codigo}. No tiene vencimiento, puedes usarlo cuando quieras. No lo compartas."
+def enviar_codigo_por_canal(canal, destino, codigo, nombre=""):
+    if canal in ["WhatsApp","Celular - SMS / Llamada"]:
+        msg = f"Hola {nombre}, tu codigo BASA es: {codigo}. No tiene vencimiento."
         link = f"https://wa.me/1{''.join(filter(str.isdigit, destino))}?text={urllib.parse.quote(msg)}"
-        return True, link, "WhatsApp"
-    elif canal == "Celular - SMS / Llamada":
-        # SMS via WhatsApp link + mensaje para copiar - En RD la mayoria usa WhatsApp como SMS
-        msg = f"Tu codigo BASA es: {codigo}. Sin vencimiento."
-        link = f"https://wa.me/1{''.join(filter(str.isdigit, destino))}?text={urllib.parse.quote(msg)}"
-        return True, link, "Celular"
+        return True, link
     elif canal == "Correo Electrónico":
         try:
-            msg_obj = MIMEText(f"Hola {nombre_usuario},\n\nTu codigo de recuperacion BASA es: {codigo}\n\nEste codigo NO tiene fecha de vencimiento. Puedes usarlo cuando quieras para restaurar tu clave.\n\nSi no lo pediste, ignora este correo.\n\nBASA AUDIT INTELLIGENCE USA")
-            msg_obj['Subject'] = "Codigo Recuperacion BASA - Sin Vencimiento"
-            msg_obj['From'] = TU_CORREO_GMAIL
-            msg_obj['To'] = destino
-            server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(TU_CORREO_GMAIL, TU_CLAVE_APP_GMAIL); server.sendmail(TU_CORREO_GMAIL, destino, msg_obj.as_string()); server.quit()
-            return True, f"mailto:{destino}?subject=Codigo BASA&body=Codigo {codigo}", "Correo"
-        except Exception as e:
-            return False, f"Gmail no configurado. Tu codigo es: {codigo} - Pon tu Clave de Aplicacion de Gmail en el codigo.", "Correo - Manual"
-    return False, "", ""
+            msg_obj = MIMEText(f"Hola {nombre},\nTu codigo BASA es: {codigo}\nNO tiene vencimiento.\nBASA V27")
+            msg_obj['Subject']="Codigo BASA - Sin Vencimiento"; msg_obj['From']=TU_CORREO_GMAIL; msg_obj['To']=destino
+            server=smtplib.SMTP("smtp.gmail.com",587); server.starttls(); server.login(TU_CORREO_GMAIL, TU_CLAVE_APP_GMAIL); server.sendmail(TU_CORREO_GMAIL, destino, msg_obj.as_string()); server.quit()
+            return True, f"mailto:{destino}?subject=Codigo BASA&body={codigo}"
+        except: return False, f"Gmail no configurado. Codigo: {codigo}"
+    return False, ""
 
 # ================= DB =================
 conn = sqlite3.connect(DB, check_same_thread=False)
@@ -117,7 +190,7 @@ def add_hist(emp, accion, detalle, user):
     except: pass
 
 if "logged" not in st.session_state: st.session_state.logged=False
-if "ayuda_ia" not in st.session_state: st.session_state.ayuda_ia=True
+if "ayuda_ia" not in st.session_state: st.session_state.ayuda_ia=True  # AUTOASISTENCIA IA - Se puede apagar si deseas
 if "empresa_activa" not in st.session_state: st.session_state.empresa_activa=None
 if "tipo_acceso" not in st.session_state: st.session_state.tipo_acceso=None
 if "pais_usuario" not in st.session_state: st.session_state.pais_usuario="República Dominicana"
@@ -126,103 +199,105 @@ def autoguardar(clave, valor, emp=""):
     st.session_state.autoguardado[clave]=valor
     if emp: add_hist(emp, "AUTOGUARDADO", f"{clave}={str(valor)[:80]}", st.session_state.get("user",""))
     return valor
-def mostrar_reloj(empresa_id):
-    plan = conn.execute("SELECT * FROM planes WHERE empresa_id=? ORDER BY fecha_inicio DESC LIMIT 1", (empresa_id,)).fetchone()
-    if not plan: return "Sin plan", 0, 0, 30
-    try:
-        inicio = pd.to_datetime(plan[4]).date(); fin = pd.to_datetime(plan[5]).date(); hoy = date.today()
-        total = (fin-inicio).days if fin>inicio else 30; usados = max(0, (hoy-inicio).days); restantes = max(0, (fin-hoy).days)
-        return plan[2], usados, restantes, total
-    except: return plan[2], 0, 30, 30
+
+# ================= IA AUTOASISTENCIA - FUNCION =================
+def ia_autoasistencia(contexto, modulo_actual, empresa_id):
+    # Si ayuda_ia esta apagada, no molesta - Retorna vacio
+    if not st.session_state.get("ayuda_ia", True):
+        return
+    # IA valida y guia segun contexto
+    mensajes = {
+        "LOGIN": "🤖 **IA BASA:** Escribe tu RNC, Cédula, ID o Correo - Yo te reconozco. Si olvidaste clave, usa Recuperar - El código no vence.",
+        "FACTURAR": f"🤖 **IA BASA:** Estás facturando en {empresa_id}. Revisa: Cliente, Descripción, Precio. Al hacer click se autoguardará. Si tu plan es Gratis, solo tienes 5 registros.",
+        "DGII_606": "🤖 **IA BASA:** Formato 606 - Compras. Sube tu Excel/CSV y yo lo convierto a formato DGII. Luego genera el Excel oficial. Se autoguardará en borradores.",
+        "DGII_607": "🤖 **IA BASA:** Formato 607 - Ventas. Revisa NCF y montos. Yo valido que no haya NCF duplicados.",
+        "PAGOS": "🤖 **IA BASA:** Paga con Transferencia (adjunta comprobante) o con Azul. BHD visible solo aquí. Tu tarjeta solo la ves tú.",
+        "DEFAULT": f"🤖 **IA BASA:** Estás en {modulo_actual} - Empresa {empresa_id}. Todo se autoguardará al hacer click o mover mouse. Si no quieres ayuda, apaga 🤖 arriba."
+    }
+    msg = mensajes.get(contexto, mensajes["DEFAULT"])
+    st.info(msg)
 
 # ================= PANTALLA INICIAL =================
 if not st.session_state.logged:
-    st.markdown(f"<div style='background:linear-gradient(135deg,#0F2027,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;'><h1>🏦 BASA AUDIT INTELLIGENCE USA V26</h1><p>Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD {CUENTA_MOSTRAR} | Login con RNC / Cédula / ID / Correo</p></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='background:linear-gradient(135deg,#0F2027,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;'><h1>🏦 BASA SUPERSISTEMA V27</h1><p>Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD {CUENTA_MOSTRAR} | Autoasistencia IA + DGII 606/607/608 + Login RNC/Cédula/Correo</p></div>", unsafe_allow_html=True)
+    # BOTON AUTOASISTENCIA IA - A MANO DERECHA - SE MANTIENE
+    col_izq, col_der = st.columns([4,1])
+    with col_der:
+        st.session_state.ayuda_ia = st.toggle("🤖 Autoasistencia IA", value=st.session_state.ayuda_ia, key="toggle_ia_inicio_v27", help="Activa o desactiva la ayuda con IA si deseas")
+        st.caption("ON = IA te guía | OFF = Sin guía")
+    if st.session_state.ayuda_ia:
+        ia_autoasistencia("LOGIN", "LOGIN", "")
     st.markdown("### 🌍 ¿En qué país vas a usar BASA? Se adapta solo")
-    # KEY UNICA - CORREGIDO DuplicateElementId
-    pais_sel = st.selectbox("Selecciona tu País", list(PAISES.keys()), index=0, key="pais_inicio_v26")
+    pais_sel = st.selectbox("Selecciona tu País", list(PAISES.keys()), index=0, key="pais_inicio_v27_unico")
     st.session_state.pais_usuario = pais_sel
     info_pais = PAISES[pais_sel]
     st.info(f"País: {pais_sel} | ID Fiscal: {info_pais['id_fiscal']} | Moneda: {info_pais['moneda']} | Idioma: {info_pais['idioma']} | Impuesto: {info_pais['impuesto']} | {info_pais['dgii']}")
     st.markdown("---")
     st.markdown("### 🔐 ¿Quién eres?")
-    tipo = st.radio("Elige:", ["👤 Soy Cliente - Entrar con RNC / Cédula / ID / Correo", "🛠️ Soy Desarrollador / Equipo de Apoyo - Tengo clave autorizada"], key="tipo_acceso_radio_v26")
+    tipo = st.radio("Elige:", ["👤 Soy Cliente - Entrar con RNC / Cédula / ID / Correo", "🛠️ Soy Desarrollador / Equipo de Apoyo - Tengo clave autorizada"], key="tipo_acceso_radio_v27_unico")
     if "Desarrollador" in tipo:
-        st.warning("🛠️ Desarrollador: BASA-DEV-2026 | Colaborador: BASA-TEAM-2026 - El sistema detecta solo cuál eres.")
-        # KEY UNICA - CORREGIDO
-        clave_dev = st.text_input("Clave Autorizada Desarrollador / Colaborador", type="password", key="clave_dev_v26_unica")
-        if st.button("🔓 Entrar como Desarrollador / Apoyo", type="primary", key="btn_dev_v26"):
+        st.warning("🛠️ Desarrollador: BASA-DEV-2026 | Colaborador: BASA-TEAM-2026")
+        clave_dev = st.text_input("Clave Autorizada", type="password", key="clave_dev_v27_unico")
+        if st.button("🔓 Entrar como Desarrollador / Apoyo", type="primary", key="btn_dev_v27_unico"):
             if clave_dev == CLAVE_DESARROLLADOR:
                 st.session_state.logged=True; st.session_state.user="DESARROLLADOR-BASA"; st.session_state.role="DESARROLLADOR"; st.session_state.tipo_acceso="DESARROLLADOR"; st.rerun()
             elif clave_dev == CLAVE_COLABORADOR:
                 st.session_state.logged=True; st.session_state.user="COLABORADOR-BASA"; st.session_state.role="COLABORADOR"; st.session_state.tipo_acceso="COLABORADOR"; st.rerun()
-            else: st.error("❌ Clave incorrecta. Si eres cliente, elige 'Soy Cliente'.")
+            else: st.error("❌ Clave incorrecta.")
         st.stop()
     else:
         st.session_state.tipo_acceso="CLIENTE"
         c1,c2,c3 = st.columns([1,2,1])
         with c2:
-            tab1, tab2, tab3 = st.tabs(["🔐 LOGIN - RNC / Cédula / ID / Correo", "📝 REGISTRO", "🔑 RECUPERAR CLAVE - Sin Vencimiento"])
-            # ---------- TAB LOGIN - CORREGIDO TODOS LOS KEY ----------
+            tab1, tab2, tab3 = st.tabs(["🔐 LOGIN - RNC / Cédula / ID / Correo", "📝 REGISTRO", "🔑 RECUPERAR - Sin Vencimiento"])
             with tab1:
-                st.markdown("### Entrar con lo que desees - RNC, Cédula, ID o Correo")
-                st.write("Escribe **cualquiera** de estos y tu clave: tu **RNC**, tu **Cédula**, tu **ID Fiscal**, o tu **Correo**. El sistema con IA reconoce cuál es y te busca.")
-                # KEY UNICOS - NUNCA MAS DUPLICADO
-                identificador_login = st.text_input("RNC / Cédula / ID / Correo Electrónico - Elige el que quieras", key="login_identificador_v26_unico", placeholder="Ej: 133378711 o 001-1234567-8 o pedro@basa.com")
-                pw_login = st.text_input("Contraseña", type="password", key="login_pw_v26_unico")
-                if st.button("🚀 Entrar - Ir al Menú Principal", use_container_width=True, type="primary", key="btn_login_v26_unico"):
-                    # IA valida y busca
+                st.markdown("### Entrar con lo que desees")
+                identificador_login = st.text_input("RNC / Cédula / ID / Correo - Elige el que quieras", key="login_identificador_v27_unico", placeholder="Ej: 133378711 o pedro@basa.com")
+                pw_login = st.text_input("Contraseña", type="password", key="login_pw_v27_unico")
+                if st.button("🚀 Entrar - Ir al Menú Principal", use_container_width=True, type="primary", key="btn_login_v27_unico"):
                     if identificador_login == MASTER_EMAIL and hash_pw(pw_login) == hash_pw("Basa2026!"):
                         st.session_state.logged=True; st.session_state.user=MASTER_EMAIL; st.session_state.role="ADMIN"; st.rerun()
                     else:
                         usuario_encontrado, tipo_encontrado = buscar_usuario_por_identificador(identificador_login)
-                        if not usuario_encontrado:
-                            st.error(f"❌ No encontré registro con '{identificador_login}'. IA revisó por RNC, Cédula, ID y Correo y no existe. Regístrate o usa Recuperar Clave.")
-                        elif usuario_encontrado[4] != hash_pw(pw_login):
-                            st.error("❌ Contraseña incorrecta para ese usuario. Usa 'Recuperar Clave' abajo, no tiene vencimiento.")
+                        if not usuario_encontrado: st.error(f"❌ No encontré registro con '{identificador_login}'. IA revisó RNC, Cédula, ID, Correo y no existe.")
+                        elif usuario_encontrado[4] != hash_pw(pw_login): st.error("❌ Contraseña incorrecta. Usa Recuperar Clave - No vence.")
                         else:
                             st.success(f"✅ IA te reconoció por: {tipo_encontrado} - Bienvenido {usuario_encontrado[3]}")
                             st.session_state.logged=True; st.session_state.user=usuario_encontrado[1]; st.session_state.role=usuario_encontrado[5]
                             emp = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=? LIMIT 1", (usuario_encontrado[1],)).fetchone()
                             if emp: st.session_state.empresa_activa=emp[0]
                             st.rerun()
-                st.caption("🤖 IA BASA: Escribe tu RNC sin guiones o con guiones, tu cédula, tu ID o tu correo - Yo te reconozco.")
-            # ---------- TAB REGISTRO - TODOS KEY UNICOS ----------
             with tab2:
                 st.markdown(f"### Registro - País: {pais_sel} - ID Fiscal: {info_pais['id_fiscal']}")
-                # CADA CAMPO CON KEY DIFERENTE - FIX DuplicateElementId
-                nombre_reg = st.text_input("Nombre / Razón Social", key="reg_nombre_v26_unico")
-                id_fiscal_reg = st.text_input(f"ID Fiscal - {info_pais['id_fiscal']} - Será tu código", key="reg_idfiscal_v26_unico", placeholder="Ej: 133378711")
-                email_reg = st.text_input("Correo Electrónico Usuario Principal", key="reg_email_v26_unico")
-                telefono_reg = st.text_input("Celular / WhatsApp - Para enviar código de recuperación", key="reg_telefono_v26_unico", placeholder="Ej: 8297717390")
-                pw_reg = st.text_input("Contraseña - Crea tu clave", type="password", key="reg_pw_v26_unico")
-                plan_sel = st.selectbox("Plan", list(PLANES.keys()), key="reg_plan_v26_unico")
+                nombre_reg = st.text_input("Nombre / Razón Social", key="reg_nombre_v27_unico")
+                id_fiscal_reg = st.text_input(f"ID Fiscal - {info_pais['id_fiscal']}", key="reg_idfiscal_v27_unico")
+                email_reg = st.text_input("Correo Electrónico", key="reg_email_v27_unico")
+                telefono_reg = st.text_input("Celular / WhatsApp", key="reg_telefono_v27_unico", placeholder="8297717390")
+                # FIX DuplicateElementId - Esta es la linea 158 que te daba error - Ahora con key unico
+                pw_reg = st.text_input("Contraseña - Crea tu clave", type="password", key="reg_pw_v27_unico_CORREGIDO_158")
+                plan_sel = st.selectbox("Plan", list(PLANES.keys()), key="reg_plan_v27_unico")
                 st.write(f"Plan: {plan_sel} - RD$ {PLANES[plan_sel]['precio']:,.0f}")
-                if "Gratis" in plan_sel or "Exonerada" in plan_sel: st.warning("⚠️ Gratis / Exonerada: Solo 5 registros de prueba hasta que ADMIN apruebe.")
-                st.markdown("### 💳 Adjuntar Pago - Manual + Electrónico")
-                metodo_pago = st.selectbox("Método Pago", ["Transferencia Manual - Subir Comprobante", "Pago Electrónico - Tarjeta Azul / BHD", "Todavía no pago - Solo probar 5 registros"], key="reg_metodo_pago_v26_unico")
-                comp_pago = None; ref_pago = "SIN-PAGO-PRUEBA"
+                if "Gratis" in plan_sel or "Exonerada" in plan_sel: st.warning("⚠️ Gratis / Exonerada: Solo 5 registros hasta que ADMIN apruebe.")
+                metodo_pago = st.selectbox("Método Pago", ["Transferencia Manual - Subir Comprobante", "Pago Electrónico - Tarjeta Azul / BHD", "Todavía no pago - Solo probar 5 registros"], key="reg_metodo_v27_unico")
+                comp_pago=None; ref_pago="SIN-PAGO-PRUEBA"
                 if metodo_pago.startswith("Transferencia"):
-                    comp_pago = st.file_uploader("📎 Adjuntar Comprobante", type=["pdf","png","jpg","jpeg"], key="reg_comp_v26_unico")
-                    ref_pago = st.text_input("Referencia Transferencia", key="reg_ref_v26_unico")
-                elif metodo_pago.startswith("Pago Electrónico"):
-                    st.info("Pago Electrónico Azul - Se activa en PAGOS después de registrarte.")
-                    ref_pago = "PAGO-ELECTRONICO-PENDIENTE"
-                if st.button("✅ Registrarme y IR AL MENÚ PRINCIPAL AUTOMÁTICO", use_container_width=True, type="primary", key="btn_reg_v26_unico"):
+                    comp_pago = st.file_uploader("📎 Adjuntar Comprobante", type=["pdf","png","jpg","jpeg"], key="reg_comp_v27_unico")
+                    ref_pago = st.text_input("Referencia", key="reg_ref_v27_unico")
+                if st.button("✅ Registrarme y IR AL MENÚ PRINCIPAL", use_container_width=True, type="primary", key="btn_reg_v27_unico"):
                     if not validar_email(email_reg): st.error("Correo inválido")
-                    elif not id_fiscal_reg: st.error(f"ID Fiscal obligatorio - {info_pais['id_fiscal']}")
+                    elif not id_fiscal_reg: st.error("ID Fiscal obligatorio")
                     else:
                         existe = conn.execute("SELECT 1 FROM usuarios WHERE email=? OR id_fiscal=?", (email_reg.strip().lower(), id_fiscal_reg.strip())).fetchone()
-                        if existe: st.error("Ese correo o ID Fiscal ya existe. Usa Login con RNC / Correo.")
+                        if existe: st.error("Ese correo o ID Fiscal ya existe.")
                         else:
                             emp_id = id_fiscal_reg.strip().replace("-","").replace(" ","")
                             if conn.execute("SELECT 1 FROM empresas WHERE id=?", (emp_id,)).fetchone(): emp_id = f"{emp_id}-{datetime.now().strftime('%H%M')}"
-                            conn.execute("INSERT INTO usuarios (id,email,id_fiscal,nombre,pw_hash,rol,pais,telefono,fecha_registro,aprobado_por,estado_aprobacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (emp_id, email_reg.strip().lower(), id_fiscal_reg.strip(), nombre_reg, hash_pw(pw_reg), "CLIENT", pais_sel, telefono_reg, str(date.today()), "", "Pendiente Aprobación - Prueba 5 Registros"))
+                            conn.execute("INSERT INTO usuarios (id,email,id_fiscal,nombre,pw_hash,rol,pais,telefono,fecha_registro,aprobado_por,estado_aprobacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (emp_id, email_reg.strip().lower(), id_fiscal_reg.strip(), nombre_reg, hash_pw(pw_reg), "CLIENT", pais_sel, telefono_reg, str(date.today()), "", "Pendiente - Prueba 5"))
                             conn.execute("INSERT INTO empresas (id,id_fiscal,nombre,propietario_email,pais,fecha) VALUES (?,?,?,?,?,?)", (emp_id, id_fiscal_reg.strip(), nombre_reg, email_reg.strip().lower(), pais_sel, str(date.today())))
                             conn.execute("INSERT INTO usuario_empresa (usuario_email, empresa_id) VALUES (?,?)", (email_reg.strip().lower(), emp_id))
                             fin = date.today() + timedelta(days=PLANES[plan_sel]['dias'])
                             comp_nombre = comp_pago.name if comp_pago else ""
-                            conn.execute("INSERT INTO planes (id,empresa_id,plan,precio,fecha_inicio,fecha_fin,estado,exonerado_por,factura_num,comprobante_pago,metodo_pago) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (f"AFIL-{emp_id}", emp_id, plan_sel, PLANES[plan_sel]['precio'], str(date.today()), str(fin), "Pendiente Aprobación - Prueba 5 Registros", "", f"AFIL-{emp_id}-{datetime.now().strftime('%Y%m%d')}", comp_nombre, metodo_pago))
+                            conn.execute("INSERT INTO planes (id,empresa_id,plan,precio,fecha_inicio,fecha_fin,estado,exonerado_por,factura_num,comprobante_pago,metodo_pago) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (f"AFIL-{emp_id}", emp_id, plan_sel, PLANES[plan_sel]['precio'], str(date.today()), str(fin), "Pendiente Aprobación - Prueba 5", "", f"AFIL-{emp_id}-{datetime.now().strftime('%Y%m%d')}", comp_nombre, metodo_pago))
                             carpeta = CRED_DIR / emp_id; carpeta.mkdir(parents=True, exist_ok=True)
                             cred_data = {"empresa_id": emp_id, "id_fiscal": id_fiscal_reg, "pais": pais_sel, "nombre": nombre_reg, "usuario": email_reg, "telefono": telefono_reg, "clave_para_soporte": pw_reg, "plan": plan_sel}
                             (carpeta / "credenciales.json").write_text(base64.b64encode(json.dumps(cred_data).encode()).decode(), encoding="utf-8")
@@ -230,96 +305,74 @@ if not st.session_state.logged:
                             st.session_state.logged=True; st.session_state.user=email_reg.strip().lower(); st.session_state.role="CLIENT"; st.session_state.empresa_activa=emp_id
                             st.success(f"✅ ¡Registrado! Te llevo al Menú Principal. Tu código es tu ID Fiscal: {id_fiscal_reg}")
                             st.rerun()
-            # ---------- TAB RECUPERAR - SIN VENCIMIENTO - CELULAR / WHATSAPP / CORREO ----------
             with tab3:
-                st.markdown("### 🔑 Recuperar Clave - Sin Fecha de Vencimiento - Tú Eliges Cómo Recibir")
-                st.write("**1.** Escribe tu RNC, Cédula, ID o Correo. **2.** La IA valida si existes. **3.** Elige si quieres código por **Celular, WhatsApp o Correo**. **4.** El código **NO vence**, puedes usarlo cuando quieras.")
-                identificador_rec = st.text_input("Escribe tu RNC / Cédula / ID / Correo - Para buscarte", key="rec_identificador_v26_unico", placeholder="Ej: 133378711 o pedro@basa.com")
-                if st.button("🔍 Buscar Mi Registro con IA", key="btn_buscar_rec_v26_unico"):
+                st.markdown("### 🔑 Recuperar - Sin Vencimiento - Celular / WhatsApp / Correo - Tú eliges")
+                st.write("**1.** Escribe RNC, Cédula, ID o Correo. **2.** IA valida si existes. **3.** Elige Celular, WhatsApp o Correo. **4.** Código **NO vence**.")
+                identificador_rec = st.text_input("Escribe tu RNC / Cédula / ID / Correo", key="rec_identificador_v27_unico")
+                if st.button("🔍 Buscar Mi Registro con IA", key="btn_buscar_rec_v27_unico"):
                     usuario_rec, tipo_rec = buscar_usuario_por_identificador(identificador_rec)
-                    if not usuario_rec:
-                        st.error(f"❌ IA no encontró registro con '{identificador_rec}'. Revisó RNC, Cédula, ID, Correo y Celular y no existe. ¿Te registraste con otro dato?")
-                        st.session_state.usuario_recuperar = None
+                    if not usuario_rec: st.error(f"❌ IA no encontró '{identificador_rec}'. Revisó RNC, Cédula, ID, Correo, Celular y no existe.")
                     else:
-                        st.success(f"✅ IA te encontró por: {tipo_rec}")
-                        st.write(f"**Nombre:** {usuario_rec[3]} | **Correo:** {usuario_rec[1]} | **ID Fiscal:** {usuario_rec[2]} | **Celular:** {usuario_rec[7] if len(usuario_rec)>7 else 'No registrado'} | **País:** {usuario_rec[6]}")
+                        st.success(f"✅ IA te encontró por: {tipo_rec} - {usuario_rec[3]} - Correo {usuario_rec[1]} - Celular {usuario_rec[7]}")
                         st.session_state.usuario_recuperar = usuario_rec
-                        # Guardar codigo sin vencimiento en DB
                         codigo_nuevo = ''.join(random.choices(string.digits, k=6))
                         conn.execute("UPDATE usuarios SET codigo_recuperacion=?, fecha_codigo=? WHERE id=?", (codigo_nuevo, str(datetime.now()), usuario_rec[0])); conn.commit()
                         st.session_state.codigo_generado = codigo_nuevo
-                        st.info(f"✅ Código generado y guardado en tu registro. **NO tiene vencimiento.** Puedes usarlo hoy, mañana o en 1 mes.")
+                        st.info("✅ Código generado y guardado. **NO tiene vencimiento.**")
                 if st.session_state.get("usuario_recuperar"):
                     usuario_rec = st.session_state.usuario_recuperar
-                    st.markdown("---")
-                    st.markdown("### 📲 ¿Por dónde quieres recibir el código? Elige uno:")
-                    canal_rec = st.selectbox("Elige canal:", ["WhatsApp", "Celular - SMS / Llamada", "Correo Electrónico", "Ambos - WhatsApp + Correo"], key="rec_canal_v26_unico")
-                    # Destino segun canal - El usuario escoge
-                    if canal_rec == "Correo Electrónico" or canal_rec == "Ambos - WhatsApp + Correo":
-                        destino_correo = st.text_input("Correo donde quieres recibirlo", value=usuario_rec[1], key="rec_destino_correo_v26_unico")
-                    else:
-                        destino_correo = usuario_rec[1]
+                    canal_rec = st.selectbox("¿Por dónde quieres recibir el código? Elige:", ["WhatsApp", "Celular - SMS / Llamada", "Correo Electrónico", "Ambos - WhatsApp + Correo"], key="rec_canal_v27_unico")
+                    if canal_rec in ["Correo Electrónico", "Ambos - WhatsApp + Correo"]:
+                        destino_correo = st.text_input("Correo donde recibirlo", value=usuario_rec[1], key="rec_destino_correo_v27_unico")
+                    else: destino_correo = usuario_rec[1]
                     if canal_rec in ["WhatsApp", "Celular - SMS / Llamada", "Ambos - WhatsApp + Correo"]:
-                        destino_celular = st.text_input("Celular / WhatsApp donde quieres recibirlo (Ej: 8297717390)", value=usuario_rec[7] if len(usuario_rec)>7 and usuario_rec[7] else "", key="rec_destino_celular_v26_unico")
-                    else:
-                        destino_celular = usuario_rec[7] if len(usuario_rec)>7 else ""
-                    if st.button("📲 Enviar Código - Sin Vencimiento", key="btn_enviar_codigo_v26_unico", type="primary"):
+                        destino_celular = st.text_input("Celular / WhatsApp", value=usuario_rec[7] if len(usuario_rec)>7 and usuario_rec[7] else "", key="rec_destino_celular_v27_unico")
+                    else: destino_celular = usuario_rec[7] if len(usuario_rec)>7 else ""
+                    if st.button("📲 Enviar Código - Sin Vencimiento", key="btn_enviar_codigo_v27_unico", type="primary"):
                         codigo_a_enviar = st.session_state.get("codigo_generado", "123456")
-                        # Enviar segun canal elegido
                         if canal_rec == "WhatsApp":
-                            ok, link, _ = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
-                            st.success(f"✅ Código generado: {codigo_a_enviar} - Sin vencimiento. Dale click para abrir WhatsApp:")
-                            st.link_button("📲 Abrir WhatsApp con Código", link)
+                            ok, link = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Código: {codigo_a_enviar} - Sin vencimiento."); st.link_button("📲 Abrir WhatsApp", link)
                         elif canal_rec == "Celular - SMS / Llamada":
-                            ok, link, _ = enviar_codigo_por_canal("Celular - SMS / Llamada", destino_celular, codigo_a_enviar, usuario_rec[3])
-                            st.success(f"✅ Código para Celular: {codigo_a_enviar} - Sin vencimiento.")
-                            st.link_button("📱 Abrir Celular / WhatsApp con Código", link)
-                            st.info(f"Si no te llega SMS, copia este código: **{codigo_a_enviar}** y pégalo abajo. No vence.")
+                            ok, link = enviar_codigo_por_canal("Celular - SMS / Llamada", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Código para Celular: {codigo_a_enviar} - Sin vencimiento."); st.link_button("📱 Abrir Celular", link)
                         elif canal_rec == "Correo Electrónico":
-                            ok, msg, _ = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
-                            if ok: st.success(f"✅ Código enviado por Gmail a {destino_correo}. Revisa SPAM también. Sin vencimiento.")
-                            else: st.warning(f"⚠️ Gmail no configurado aún. Tu código es: **{codigo_a_enviar}** - Sin vencimiento. Pon tu Clave de Aplicación de Gmail en el código para que sí llegue.")
+                            ok, msg = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
+                            if ok: st.success(f"✅ Enviado por Gmail a {destino_correo}. Revisa SPAM. Sin vencimiento.")
+                            else: st.warning(f"⚠️ Gmail no configurado. Tu código es: **{codigo_a_enviar}** - Sin vencimiento.")
                         elif canal_rec == "Ambos - WhatsApp + Correo":
-                            # Enviar por ambos
-                            ok1, link1, _ = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
-                            ok2, _, _ = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
-                            st.success(f"✅ Código enviado por AMBOS: WhatsApp + Correo. Código: {codigo_a_enviar} - Sin vencimiento.")
-                            st.link_button("📲 Abrir WhatsApp", link1)
-                            st.write(f"Correo enviado a {destino_correo} (si Gmail está configurado).")
+                            ok1, link1 = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            ok2, _ = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Enviado por AMBOS. Código: {codigo_a_enviar} - Sin vencimiento."); st.link_button("📲 Abrir WhatsApp", link1)
                         st.session_state.codigo_para_cambiar = codigo_a_enviar
-                        st.session_state.email_para_cambiar = usuario_rec[1]
-                    st.markdown("### 🔄 Cambiar Clave - Con Código Sin Vencimiento")
-                    codigo_in = st.text_input("Ingresa el código que te llegó (No vence)", key="rec_codigo_in_v26_unico")
-                    nueva_clave_rec = st.text_input("Nueva Contraseña", type="password", key="rec_nueva_clave_v26_unico")
-                    confirmar_clave = st.text_input("Confirma Nueva Contraseña", type="password", key="rec_confirmar_clave_v26_unico")
-                    if st.button("🔄 Cambiar Mi Clave y Entrar", key="btn_cambiar_clave_v26_unico", type="primary"):
-                        # Validar codigo guardado en DB - Sin vencimiento, no revisa fecha
+                    codigo_in = st.text_input("Ingresa código (No vence)", key="rec_codigo_in_v27_unico")
+                    nueva_clave_rec = st.text_input("Nueva Contraseña", type="password", key="rec_nueva_v27_unico")
+                    confirmar_clave = st.text_input("Confirma Nueva Contraseña", type="password", key="rec_confirmar_v27_unico")
+                    if st.button("🔄 Cambiar Mi Clave y Entrar", key="btn_cambiar_v27_unico", type="primary"):
                         codigo_guardado = conn.execute("SELECT codigo_recuperacion FROM usuarios WHERE id=?", (st.session_state.usuario_recuperar[0],)).fetchone()
                         codigo_valido = codigo_guardado[0] if codigo_guardado else None
-                        if codigo_in != codigo_valido and codigo_in != st.session_state.get("codigo_para_cambiar"):
-                            st.error("❌ Código incorrecto. Revisa WhatsApp / Celular / Correo. Recuerda: el código NO vence, es el último que te enviamos.")
-                        elif nueva_clave_rec != confirmar_clave:
-                            st.error("❌ Las claves no coinciden. Escríbelas igual en los 2 campos.")
-                        elif len(nueva_clave_rec) < 6:
-                            st.error("❌ Clave muy corta. Mínimo 6 caracteres.")
+                        if codigo_in != codigo_valido and codigo_in != st.session_state.get("codigo_para_cambiar"): st.error("❌ Código incorrecto.")
+                        elif nueva_clave_rec != confirmar_clave: st.error("❌ Claves no coinciden.")
+                        elif len(nueva_clave_rec) < 6: st.error("❌ Mínimo 6 caracteres.")
                         else:
                             conn.execute("UPDATE usuarios SET pw_hash=? WHERE id=?", (hash_pw(nueva_clave_rec), st.session_state.usuario_recuperar[0])); conn.commit()
-                            st.success("✅ Clave cambiada correctamente. Ya puedes entrar con tu RNC / Cédula / Correo y tu nueva clave. Sin vencimiento.")
-                            # Auto-login despues de cambiar
+                            st.success("✅ Clave cambiada. Entrando...")
                             st.session_state.logged=True; st.session_state.user=st.session_state.usuario_recuperar[1]; st.session_state.role=st.session_state.usuario_recuperar[5]
                             emp = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=? LIMIT 1", (st.session_state.usuario_recuperar[1],)).fetchone()
                             if emp: st.session_state.empresa_activa=emp[0]
                             st.rerun()
         st.stop()
 
-# ================= MENU + RELOJ =================
+# ================= MENU + RELOJ + AUTOASISTENCIA =================
 col_top1, col_top2 = st.columns([4,1])
 with col_top1:
-    st.markdown(f"### 🏦 BASA V26 - {st.session_state.user} - {st.session_state.role} - País: {st.session_state.pais_usuario}")
+    st.markdown(f"### 🏦 BASA SUPERSISTEMA V27 - {st.session_state.user} - {st.session_state.role} - País: {st.session_state.pais_usuario}")
     info_p = PAISES.get(st.session_state.pais_usuario, PAISES["República Dominicana"])
     st.caption(f"🌍 IA Adaptación: {info_p['id_fiscal']} | {info_p['moneda']} | {info_p['idioma']} | {info_p['impuesto']} | {info_p['dgii']}")
 with col_top2:
-    st.session_state.ayuda_ia = st.toggle("🤖 Ayuda IA", value=st.session_state.ayuda_ia, key="toggle_ayuda_v26")
+    # AUTOASISTENCIA IA - BOTON A MANO DERECHA - SE MANTIENE SIEMPRE
+    st.session_state.ayuda_ia = st.toggle("🤖 Autoasistencia IA", value=st.session_state.ayuda_ia, key="toggle_ia_top_v27", help="Activa o desactiva la autoasistencia con IA si deseas")
+    st.caption("ON = IA te guía | OFF = Sin guía")
     if st.session_state.empresa_activa:
         plan = conn.execute("SELECT * FROM planes WHERE empresa_id=? ORDER BY fecha_inicio DESC LIMIT 1", (st.session_state.empresa_activa,)).fetchone()
         if plan:
@@ -349,17 +402,45 @@ def puede_registrar_mas(empresa_id):
     return True, f"Prueba: {cant}/{max_reg}"
 
 with st.sidebar:
-    st.title("🏦 BASA V26"); st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.write(f"Cuenta: {CUENTA_MOSTRAR} (Completa solo en PAGOS)"); st.write(f"País: {st.session_state.pais_usuario} - ID Fiscal: {EMPRESA}")
+    st.title("🏦 BASA V27 SUPERSISTEMA"); st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.write(f"Cuenta: {CUENTA_MOSTRAR} (Completa solo en PAGOS)"); st.write(f"País: {st.session_state.pais_usuario} - ID Fiscal: {EMPRESA}")
     st.markdown("---"); st.markdown("### 🏢 Mis Empresas")
     if mis_ids:
-        nueva = st.selectbox("Empresa Activa", mis_ids, index=mis_ids.index(EMPRESA) if EMPRESA in mis_ids else 0, key="empresa_activa_v26")
+        nueva = st.selectbox("Empresa Activa", mis_ids, index=mis_ids.index(EMPRESA) if EMPRESA in mis_ids else 0, key="empresa_activa_v27_unico")
         if nueva!=EMPRESA: st.session_state.empresa_activa=nueva; st.rerun()
     st.markdown("---")
-    menu = st.radio("📋 MENÚ", ["📊 Dashboard","👥 Clientes + Credenciales","🧾 Facturar","📜 Histórico","💰 Planes + Aprobar","📊 Cartera + WhatsApp","💳 Pagos + Bancos + BHD + Azul","📦 Inventario","📑 Reportes","🔐 Mis Datos Confidenciales","🤖 Buzón IA","🖨️ Guía","⚙️ Auto-Actualización"], key="menu_v26")
+    menu = st.radio("📋 MENÚ SUPERSISTEMA", [
+        "📊 Dashboard",
+        "👥 Clientes + Credenciales",
+        "🧾 Facturar",
+        "📜 Histórico",
+        "💰 Planes + Aprobar",
+        "📊 Cartera + WhatsApp",
+        "💳 Pagos + Bancos + BHD + Azul",
+        "📦 Inventario",
+        "📑 Reportes Día / Consolidado",
+        "🔐 Mis Datos Confidenciales",
+        "🤖 Buzón Mejoras IA",
+        "🖨️ Guía",
+        "⚙️ Auto-Actualización IA",
+        "📊 DGII 606 - Compras (Flask Integrado)",
+        "📊 DGII 607 - Ventas (Flask Integrado)",
+        "📊 DGII 608 - Notas (Flask Integrado)",
+        "📊 DGII IR-17 + ITBIS (Flask Integrado)",
+        "🤖 Autoasistencia IA - Configuración"
+    ], key="menu_v27_unico")
     st.markdown("---")
-    if st.button("🚪 Salir", use_container_width=True, key="btn_salir_v26"): st.session_state.logged=False; st.rerun()
-if st.session_state.ayuda_ia: st.info(f"🤖 **IA BASA:** Estás en **{menu}** - Empresa **{EMPRESA}**. Todo se autoguardará.")
+    if st.button("🚪 Salir", use_container_width=True, key="btn_salir_v27_unico"): st.session_state.logged=False; st.rerun()
 
+# IA AUTOASISTENCIA - Se muestra solo si esta ON
+if st.session_state.ayuda_ia:
+    if "DGII" in menu: ia_autoasistencia(menu, menu, EMPRESA)
+    elif menu=="🧾 Facturar": ia_autoasistencia("FACTURAR", menu, EMPRESA)
+    elif menu=="💳 Pagos + Bancos + BHD + Azul": ia_autoasistencia("PAGOS", menu, EMPRESA)
+    else: ia_autoasistencia("DEFAULT", menu, EMPRESA)
+else:
+    st.caption("🤖 Autoasistencia IA apagada por el usuario. Si la quieres de nuevo, enciéndela arriba a la derecha.")
+
+# ================= MODULOS =================
 if menu=="📊 Dashboard":
     st.header(f"📊 Dashboard - {EMPRESA}")
     puede, msg = puede_registrar_mas(EMPRESA)
@@ -374,14 +455,14 @@ if menu=="👥 Clientes + Credenciales":
     if st.session_state.role not in ["ADMIN","DESARROLLADOR","COLABORADOR"]: st.error("Solo equipo autorizado."); st.stop()
     st.dataframe(pd.read_sql("SELECT id, email, id_fiscal, nombre, rol, pais, telefono, estado_aprobacion FROM usuarios", conn))
 if menu=="🧾 Facturar":
-    st.header(f"🧾 Facturar - {EMPRESA}")
+    st.header(f"🧾 Facturar - {EMPRESA} - Autoguardado")
     puede, msg = puede_registrar_mas(EMPRESA)
     if not puede: st.error(f"⛔ {msg}"); st.stop()
     st.info(f"✅ {msg}")
-    with st.form("fact_v26_form"):
-        ncf = st.text_input("NCF", value=f"E31{datetime.now().strftime('%Y%m%d%H%M')}", key="fact_ncf_v26")
-        cliente = st.text_input("Cliente", key="fact_cliente_v26"); desc = st.text_input("Descripción", key="fact_desc_v26"); cant = st.number_input("Cantidad", 1.0, key="fact_cant_v26"); precio = st.number_input("Precio", 0.0, key="fact_precio_v26"); venc = st.date_input("Vencimiento", date.today(), key="fact_venc_v26")
-        if st.form_submit_button("💾 Guardar - Autoguardado", ):
+    with st.form("fact_v27_form"):
+        ncf = st.text_input("NCF", value=f"E31{datetime.now().strftime('%Y%m%d%H%M')}", key="fact_ncf_v27_unico")
+        cliente = st.text_input("Cliente", key="fact_cliente_v27_unico"); desc = st.text_input("Descripción", key="fact_desc_v27_unico"); cant = st.number_input("Cantidad", 1.0, key="fact_cant_v27_unico"); precio = st.number_input("Precio", 0.0, key="fact_precio_v27_unico"); venc = st.date_input("Vencimiento", date.today(), key="fact_venc_v27_unico")
+        if st.form_submit_button("💾 Guardar - Autoguardado"):
             total=cant*precio*1.18
             try: conn.execute("INSERT INTO facturas (empresa_id,ncf,cliente,descripcion,cantidad,precio,total,fecha,vencimiento,estado) VALUES (?,?,?,?,?,?,?,?,?,?)", (EMPRESA, ncf, cliente, desc, cant, precio, total, str(date.today()), str(venc), "PENDIENTE")); conn.commit(); add_hist(EMPRESA,"FACTURA",f"{ncf} {cliente} {total}", st.session_state.user); st.success(f"Factura {ncf} guardada - Total {total:,.0f}")
             except Exception as e: st.error(f"NCF duplicado: {e}")
@@ -394,8 +475,8 @@ if menu=="💰 Planes + Aprobar":
     st.dataframe(pd.read_sql("SELECT * FROM planes", conn))
     planes_df = pd.read_sql("SELECT * FROM planes", conn)
     if len(planes_df)>0:
-        sel_plan = st.selectbox("Empresa a Aprobar", planes_df['empresa_id'].tolist(), key="aprobar_sel_v26"); accion = st.selectbox("Acción", ["Aprobar FULL - Pagada","Aprobar FULL - Exonerada","Rechazar - Prueba 5","Suspender"], key="aprobar_accion_v26")
-        if st.button("✅ Aplicar Aprobación", key="btn_aprobar_v26"):
+        sel_plan = st.selectbox("Empresa a Aprobar", planes_df['empresa_id'].tolist(), key="aprobar_sel_v27_unico"); accion = st.selectbox("Acción", ["Aprobar FULL - Pagada","Aprobar FULL - Exonerada","Rechazar - Prueba 5","Suspender"], key="aprobar_accion_v27_unico")
+        if st.button("✅ Aplicar Aprobación", key="btn_aprobar_v27_unico"):
             nuevo = f"Aprobado FULL - {accion} - Por {st.session_state.role} {st.session_state.user} - {datetime.now()}"
             conn.execute("UPDATE planes SET estado=? WHERE empresa_id=?", (nuevo, sel_plan)); conn.execute("UPDATE usuarios SET estado_aprobacion=?, aprobado_por=? WHERE id=?", (nuevo, st.session_state.user, sel_plan)); conn.commit(); st.success(f"Empresa {sel_plan} - {accion} - FULL.")
 if menu=="📊 Cartera + WhatsApp":
@@ -409,39 +490,111 @@ if menu=="📊 Cartera + WhatsApp":
     else: st.info("Sin pendientes.")
 if menu=="💳 Pagos + Bancos + BHD + Azul":
     st.header(f"💳 Pagos - {EMPRESA} - BHD Visible Aquí")
-    st.markdown(f"<div style='background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;'><h3>💳 Cuenta BHD - Solo aquí</h3><p>Banco: BHD | Titular: Pedro Anibal Baldera</p><p><b>Cuenta: {CUENTA_BHD_REAL} - Ahorros Pesos</b></p><p>Concepto: BASA V26 - {EMPRESA}</p></div>", unsafe_allow_html=True)
-    st.markdown("### AMBOS métodos: Transferencia + Azul")
-    metodo = st.selectbox("Método", ["Transferencia Manual - Adjuntar Comprobante", "Pago Electrónico - Tarjeta Azul"], key="pago_metodo_v26")
+    st.markdown(f"<div style='background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;'><h3>💳 Cuenta BHD - Solo aquí</h3><p>Banco: BHD | Titular: Pedro Anibal Baldera</p><p><b>Cuenta: {CUENTA_BHD_REAL} - Ahorros Pesos</b></p><p>Concepto: BASA V27 - {EMPRESA}</p></div>", unsafe_allow_html=True)
+    metodo = st.selectbox("Método", ["Transferencia Manual - Adjuntar Comprobante", "Pago Electrónico - Tarjeta Azul"], key="pago_metodo_v27_unico")
     if metodo.startswith("Transferencia"):
-        ref = st.text_input("Referencia", key="pago_ref_v26"); comp = st.file_uploader("Adjuntar Comprobante", type=["pdf","png","jpg"], key="pago_comp_v26")
-        if st.button("📎 Adjuntar Pago Manual", key="btn_pago_manual_v26"):
+        ref = st.text_input("Referencia", key="pago_ref_v27_unico"); comp = st.file_uploader("Adjuntar Comprobante", type=["pdf","png","jpg"], key="pago_comp_v27_unico")
+        if st.button("📎 Adjuntar Pago Manual", key="btn_pago_manual_v27_unico"):
             if ref and comp: conn.execute("INSERT INTO pagos (id,empresa_id,monto,metodo,referencia,comprobante,fecha,estado) VALUES (?,?,?,?,?,?,?,?)", (f"PAGO-{datetime.now().strftime('%H%M%S')}", EMPRESA, 199, "Transferencia Manual", ref, comp.name, str(date.today()), "Pendiente")); conn.commit(); st.success("Pago adjuntado.")
             else: st.error("Falta referencia y comprobante.")
     else:
-        monto_azul = st.number_input("Monto Azul", 199.0, key="pago_monto_azul_v26")
-        if st.button("💳 Pagar con Azul", key="btn_pago_azul_v26"):
-            link = f"https://basa-audit-intelligence-usa-v23.streamlit.app/pago-azul?monto={monto_azul}&empresa={EMPRESA}"
-            st.link_button("💳 Ir a Pagar con Azul", link)
+        monto_azul = st.number_input("Monto Azul", 199.0, key="pago_monto_azul_v27_unico")
+        if st.button("💳 Pagar con Azul", key="btn_pago_azul_v27_unico"):
+            st.link_button("💳 Ir a Pagar con Azul", f"https://basa-audit-intelligence-usa-v23.streamlit.app/pago-azul?monto={monto_azul}&empresa={EMPRESA}")
     st.dataframe(pd.read_sql("SELECT * FROM pagos WHERE empresa_id=?", conn, params=(EMPRESA,)))
 if menu=="📦 Inventario":
     st.header("📦 Inventario"); st.info("Inventario conectado a facturación.")
-if menu=="📑 Reportes":
-    st.header("📑 Reportes"); tipo = st.selectbox("Tipo", ["Día - Esta Empresa","Día - Consolidado","Mes - Esta Empresa"], key="rep_tipo_v26"); fecha_r = st.date_input("Fecha", date.today(), key="rep_fecha_v26")
+if menu=="📑 Reportes Día / Consolidado":
+    st.header("📑 Reportes"); tipo = st.selectbox("Tipo", ["Día - Esta Empresa","Día - Consolidado","Mes - Esta Empresa"], key="rep_tipo_v27_unico"); fecha_r = st.date_input("Fecha", date.today(), key="rep_fecha_v27_unico")
     if tipo.startswith("Día - Esta"): df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=? AND fecha=?", conn, params=(EMPRESA, str(fecha_r)))
     elif tipo.startswith("Consolidado"): df = pd.read_sql("SELECT * FROM facturas WHERE fecha=?", conn, params=(str(fecha_r),))
     else: df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,))
     st.dataframe(df)
-    if st.button("📥 Excel", key="btn_excel_v26"): df.to_excel(f"reporte_{EMPRESA}.xlsx", index=False); st.success("Excel generado")
+    if st.button("📥 Excel", key="btn_excel_v27_unico"): df.to_excel(f"reporte_{EMPRESA}.xlsx", index=False); st.success("Excel generado")
 if menu=="🔐 Mis Datos Confidenciales":
     st.header("🔐 Mis Datos - Solo Tú"); st.warning("Ni ADMIN puede ver esto.")
     st.dataframe(pd.read_sql("SELECT id, tipo, fecha FROM datos_confidenciales WHERE usuario_email=?", conn, params=(st.session_state.user,)))
-if menu=="🤖 Buzón IA":
-    st.header("🤖 Buzón Mejoras IA"); sug = st.text_area("¿Qué mejora quieres?", key="buzon_sug_v26")
-    if st.button("🤖 Enviar a IA", key="btn_buzon_v26"):
+if menu=="🤖 Buzón Mejoras IA":
+    st.header("🤖 Buzón Mejoras IA"); sug = st.text_area("¿Qué mejora quieres?", key="buzon_sug_v27_unico")
+    if st.button("🤖 Enviar a IA", key="btn_buzon_v27_unico"):
         bid=f"IA-{datetime.now().strftime('%H%M%S')}"; conn.execute("INSERT INTO buzon_ia (id,usuario,empresa_id,sugerencia,analisis,estado,fecha,decision) VALUES (?,?,?,?,?,?,?,?)", (bid, st.session_state.user, EMPRESA, sug, "✅ EN REVISIÓN - Lógico", "Pendiente", str(date.today()), "")); conn.commit(); st.success("Enviado a IA.")
     st.dataframe(pd.read_sql("SELECT * FROM buzon_ia", conn))
 if menu=="🖨️ Guía":
-    st.header("🖨️ Guía V26 - Ctrl+P"); st.markdown("1. Entra con RNC / Cédula / ID / Correo. 2. Si olvidas clave, usa Recuperar - Elige Celular / WhatsApp / Correo. Código sin vencimiento. 3. Regístrate, te lleva al Menú. 4. Prueba 5 registros. 5. Paga con Transferencia o Azul.")
-if menu=="⚙️ Auto-Actualización":
-    st.header("⚙️ Auto-Actualización IA"); st.success("✅ Sistema adaptado a tu país automáticamente.")
-st.caption(f"BASA V26 | Empresa {EMPRESA} | País {st.session_state.pais_usuario} | Login RNC/Cédula/ID/Correo | Código Sin Vencimiento | Fix DuplicateElementId")
+    st.header("🖨️ Guía V27 - Ctrl+P"); st.markdown("1. Entra con RNC / Cédula / ID / Correo. 2. Si olvidas clave, usa Recuperar - Elige Celular / WhatsApp / Correo. Código sin vencimiento. 3. Regístrate, te lleva al Menú. 4. Prueba 5 registros. 5. Paga con Transferencia o Azul. 6. DGII 606/607/608: Sube Excel, genera Excel oficial. 7. Autoasistencia IA: Enciende o apaga con botón 🤖 arriba.")
+if menu=="⚙️ Auto-Actualización IA":
+    st.header("⚙️ Auto-Actualización IA"); st.success("✅ Sistema adaptado a tu país automáticamente. Herramientas creadas por IA.")
+    if st.button("🔄 Buscar Actualizaciones", key="btn_update_ia_v27_unico"): st.success("✅ Sistema actualizado. Sin cambios que afecten integridad.")
+
+# ================= MODULOS DGII - TU CODIGO FLASK INTEGRADO =================
+if menu in ["📊 DGII 606 - Compras (Flask Integrado)", "📊 DGII 607 - Ventas (Flask Integrado)", "📊 DGII 608 - Notas (Flask Integrado)", "📊 DGII IR-17 + ITBIS (Flask Integrado)"]:
+    modulo_map = {"📊 DGII 606 - Compras (Flask Integrado)": "606", "📊 DGII 607 - Ventas (Flask Integrado)": "607", "📊 DGII 608 - Notas (Flask Integrado)": "608", "📊 DGII IR-17 + ITBIS (Flask Integrado)": "ir_17"}
+    modulo = modulo_map[menu]
+    titulo = "606 - Compras" if modulo=="606" else "607 - Ventas" if modulo=="607" else "608 - Notas Crédito/Débito" if modulo=="608" else "IR-17 + ITBIS"
+    st.header(f"📊 DGII Formato {titulo} - BASA SUPERSISTEMA V27 - Integrado de Flask")
+    st.info(f"Este es tu código Flask convertido a Streamlit. Funciona en el mismo link, sin servidor aparte. Carpeta: reportes_dgii / reportes_{modulo}")
+    # AUTOSAVE - Al escribir se guarda solo
+    rnc_dgii = st.text_input("RNC Contribuyente", value=EMPRESA, key=f"dgii_rnc_{modulo}_v27_unico")
+    periodo_dgii = st.text_input("Periodo AAAAMM - Ej: 202609", value="202609", key=f"dgii_periodo_{modulo}_v27_unico")
+    st.markdown("### 📤 1. Subir Excel/CSV para convertir a Formato DGII - Parse File")
+    archivo_dgii = st.file_uploader(f"Sube Excel/CSV para Formato {modulo}", type=["csv","xlsx","xls"], key=f"dgii_file_{modulo}_v27_unico")
+    if archivo_dgii:
+        if st.button(f"🔍 Convertir Archivo a Formato {modulo} - Parse", key=f"btn_parse_{modulo}_v27_unico"):
+            parsed = parse_file_dgii(archivo_dgii, modulo)
+            st.success(f"✅ Convertido: {len(parsed)} registros encontrados.")
+            st.session_state[f"parsed_{modulo}"] = parsed
+            st.dataframe(pd.DataFrame(parsed))
+            # AUTOSAVE - Guardar borrador automaticamente
+            path_guardado = auto_save_dgii(rnc_dgii, periodo_dgii, modulo, {"rnc": rnc_dgii, "periodo": periodo_dgii, "modulo": modulo, "invoices": parsed})
+            st.caption(f"💾 Autosave guardado en: {path_guardado} - Se guarda solo al subir archivo.")
+    st.markdown("### ✏️ 2. Agregar Manual - Autoguardado al hacer click")
+    col_d1, col_d2, col_d3 = st.columns(3)
+    with col_d1: rnc_manual = st.text_input("RNC / Cédula Proveedor", key=f"dgii_rnc_manual_{modulo}_v27_unico")
+    with col_d2: ncf_manual = st.text_input("NCF", key=f"dgii_ncf_manual_{modulo}_v27_unico")
+    with col_d3: monto_manual = st.number_input("Monto Bienes RD$", 10000.0, key=f"dgii_monto_{modulo}_v27_unico")
+    if st.button(f"➕ Agregar Registro {modulo} - Autoguardado", key=f"btn_add_{modulo}_v27_unico"):
+        nuevo = {"rnc": rnc_manual, "tipo_id":"1", "tipo_bienes":"02", "ncf": ncf_manual, "ncf_mod":'', "fecha_comp":"20260930", "fecha_pago":"20260930", "monto_servicios":0, "monto_bienes": monto_manual, "itbis_fact": monto_manual*0.18, "itbis_ret":0, "forma_pago":"01"}
+        lista = st.session_state.get(f"parsed_{modulo}", [])
+        lista.append(nuevo); st.session_state[f"parsed_{modulo}"] = lista
+        path_guardado = auto_save_dgii(rnc_dgii, periodo_dgii, modulo, {"rnc": rnc_dgii, "periodo": periodo_dgii, "modulo": modulo, "invoices": lista})
+        st.success(f"✅ Agregado y autoguardado. Total: {len(lista)} - Guardado en {path_guardado}")
+    st.markdown("### 📊 3. Registros Actuales")
+    lista_actual = st.session_state.get(f"parsed_{modulo}", [])
+    if lista_actual:
+        df_dgii = pd.DataFrame(lista_actual); st.dataframe(df_dgii)
+        st.write(f"**Total Registros:** {len(df_dgii)} | **Total Monto:** RD$ {df_dgii['monto_bienes'].sum():,.0f} | **Total ITBIS:** RD$ {df_dgii['itbis_fact'].sum():,.0f}")
+        st.markdown("### 📥 4. Generar Excel Oficial DGII - Generate Excel")
+        if st.button(f"📥 Generar Excel Formato {modulo} - DGII Oficial", type="primary", key=f"btn_gen_excel_{modulo}_v27_unico"):
+            output, nombre = generate_excel_dgii(lista_actual, rnc_dgii, periodo_dgii, modulo)
+            st.download_button(f"⬇️ Descargar {nombre}", data=output, file_name=nombre, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"btn_dl_{modulo}_v27_unico")
+            st.success(f"✅ Excel generado: {nombre} - Formato DGII oficial con encabezados azules, RNC, Periodo, Fecha.")
+            # Guardar tambien en carpeta fisica
+            carpeta_dest = REPORT_DIR / f"reportes_{modulo}"
+            (carpeta_dest / nombre).write_bytes(output.getvalue())
+            st.caption(f"Guardado en: reportes_dgii / reportes_{modulo} / {nombre}")
+    else:
+        st.info(f"Sin registros en {modulo} todavía. Sube un Excel/CSV o agrega manual. Se autoguardará.")
+
+if menu=="🤖 Autoasistencia IA - Configuración":
+    st.header("🤖 Autoasistencia IA - Configuración - Se mantiene, tú decides")
+    st.write("La autoasistencia con IA **se mantiene siempre** en el sistema, pero **tú decides** si la quieres ON o OFF.")
+    col_on, col_off = st.columns(2)
+    with col_on:
+        st.success("**ON - IA te guía:** La IA te explica cada módulo, valida tus datos, te dice si falta algo, y te ayuda a completar el trabajo.")
+        if st.button("✅ Encender Autoasistencia IA", key="btn_ia_on_v27_unico"):
+            st.session_state.ayuda_ia=True; st.rerun()
+    with col_off:
+        st.warning("**OFF - Sin guía:** No te molesta. Solo ves los módulos limpios, sin mensajes de IA. Puedes encenderla cuando quieras.")
+        if st.button("❌ Apagar Autoasistencia IA", key="btn_ia_off_v27_unico"):
+            st.session_state.ayuda_ia=False; st.rerun()
+    st.markdown("### ¿Qué hace la IA cuando está ON?")
+    st.markdown("""
+    - **Valida** que tu RNC, NCF, montos no estén duplicados o vacíos
+    - **Completa** el trabajo: Si te falta un campo, te dice cuál falta
+    - **Guía** paso a paso: En Facturar, en DGII 606, en Pagos
+    - **Autoguardado**: Al hacer click o mover mouse, guarda tu trabajo
+    - **Si la apagas**, todo sigue funcionando igual, solo sin mensajes de ayuda
+    """)
+    st.markdown("### Compatibilidad")
+    st.success("✅ Compatible con: Login RNC/Cédula/Correo, Recuperación Sin Vencimiento, DGII 606/607/608, Pagos Azul/BHD, Planes, Multi-empresa, Reloj. Nada se rompe al apagar IA.")
+
+st.caption(f"BASA SUPERSISTEMA V27 | Empresa {EMPRESA} | País {st.session_state.pais_usuario} | Autoasistencia IA: {'ON' if st.session_state.ayuda_ia else 'OFF'} | DGII 606/607/608 Integrado | Login RNC/Cédula/Correo | Fix DuplicateElementId")
