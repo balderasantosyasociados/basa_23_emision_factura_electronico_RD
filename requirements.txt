@@ -1,37 +1,27 @@
 # ==============================================================================
-# 🏦 BASA SUPERSISTEMA V27 - REQUISITOS UNIVERSALES COMPLETOS
-# Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD ****0021
-# Autoasistencia IA + DGII 606/607/608 + Login RNC/Cédula/Correo
-# Para TODOS los desarrollos BASA - Mantener igual en todos los proyectos
+# 🏦 BASA SUPERSISTEMA V27 - REQUIREMENTS UNIVERSALES
 # ==============================================================================
 
-# --- Frontend & Visualización Web ---
 streamlit>=1.40.0
 
-# --- Procesamiento de Datos & Cálculo Numérico (Excel DGII Formato Azul) ---
 numpy>=2.0.0
 pandas>=2.2.0
 openpyxl>=3.1.5
 xlsxwriter>=3.2.0
 
-# --- Persistencia, Base de Datos & ORM ---
 SQLAlchemy>=2.0.0
 
-# --- API, Servidor & Modelado de Datos ---
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 python-multipart>=0.0.9
 pydantic>=2.8.0
 
-# --- Conectividad & Configuración ---
 requests>=2.32.0
 python-dotenv>=1.0.0
 
-# --- Seguridad, Firma Electrónica & XML (DGII Autenticación) ---
 cryptography>=43.0.0
 lxml>=5.3.0
 signxml>=4.0.0
 
-# --- Utilidades BASA - Autonomía (Para que no falte nada) ---
-pillow>=10.0.0
+Pillow>=10.0.0
 python-dateutil>=2.8.2
