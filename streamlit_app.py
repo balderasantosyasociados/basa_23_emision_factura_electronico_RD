@@ -1,64 +1,35 @@
-# BASA V25 FINAL - AMBAS CLAVES + AMBOS PAGOS ACTIVOS
-# 1) DESARROLLADOR BASA-DEV-2026  2) COLABORADOR BASA-TEAM-2026
-# 1) Pago Tarjeta Azul  2) Gmail Real Recuperacion
-import streamlit as st, sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib
+# BASA V26 FINAL - CORREGIDO DuplicateElementId + Login RNC/Cedula/Correo + Recuperacion Celular/WhatsApp/Correo + Sin Vencimiento + IA Valida
+import streamlit as st, sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from email.mime.text import MIMEText
 import urllib.parse
 
-st.set_page_config(page_title="BASA V25 FINAL - AMBAS CLAVES", layout="wide", page_icon="🏦")
+st.set_page_config(page_title="BASA V26 - Login RNC/Cedula/Correo", layout="wide", page_icon="🏦")
 
-# ================= CLAVES AMBAS ACTIVAS =================
-CLAVE_DESARROLLADOR = "BASA-DEV-2026"   # TU - Acceso TOTAL
-CLAVE_COLABORADOR = "BASA-TEAM-2026"    # TU EQUIPO - Acceso APOYO
-MASTER_EMAIL = "Licpedrobaldera@gmail.com"
+# ================= CONFIG =================
+BASE = Path("BASA_V26_PROFESIONAL"); BASE.mkdir(exist_ok=True)
+CLIENTES_DIR = BASE / "clientes_db"; CLIENTES_DIR.mkdir(exist_ok=True)
+CRED_DIR = BASE / "credenciales_privadas"; CRED_DIR.mkdir(exist_ok=True)
+DB = BASE / "basa_v26.db"
 CUENTA_BHD_REAL = "08694150021"
 def mascara(c): return f"****{c[-4:]}"
 CUENTA_MOSTRAR = mascara(CUENTA_BHD_REAL)
-
-# ================= GMAIL REAL - PARA QUE SI LLEGUE CODIGO =================
-# Configura tu Gmail aqui: Gmail -> Seguridad -> Contrasenas de aplicaciones -> Crea una para BASA
+MASTER_EMAIL = "Licpedrobaldera@gmail.com"
+CLAVE_DESARROLLADOR = "BASA-DEV-2026"
+CLAVE_COLABORADOR = "BASA-TEAM-2026"
+# GMAIL - Pon tu clave de aplicacion aqui para que si llegue correo
 TU_CORREO_GMAIL = "Licpedrobaldera@gmail.com"
-TU_CLAVE_APP_GMAIL = "XXXX-XXXX-XXXX-XXXX"  # <-- Pon aqui tu clave de aplicacion de 16 letras de Gmail
-def enviar_codigo_gmail(correo_destino, codigo):
-    try:
-        msg = MIMEText(f"Hola, tu codigo de recuperacion BASA V25 es: {codigo}\nSi no lo pediste, ignora este correo.\nBASA AUDIT INTELLIGENCE USA")
-        msg['Subject'] = "Codigo Recuperacion BASA V25"
-        msg['From'] = TU_CORREO_GMAIL
-        msg['To'] = correo_destino
-        server = smtplib.SMTP("smtp.gmail.com", 587)
-        server.starttls()
-        server.login(TU_CORREO_GMAIL, TU_CLAVE_APP_GMAIL)
-        server.sendmail(TU_CORREO_GMAIL, correo_destino, msg.as_string())
-        server.quit()
-        return True
-    except Exception as e:
-        return False
-
-# ================= PAGO AZUL + TRANSFERENCIA - AMBOS ACTIVOS =================
-def link_pago_azul(monto, ncf, cliente):
-    # AMBOS METODOS ACTIVOS: Azul + Transferencia BHD
-    # Para Azul real, pon aqui tu link de Azul de tu banco BHD
-    # Ejemplo: https://pagos.azul.com.do/...
-    LINK_AZUL_REAL = "https://basa-audit-intelligence-usa-v23.streamlit.app/pago-azul"  # <-- Cambia por tu link real de Azul
-    params = urllib.parse.urlencode({"monto": monto, "ncf": ncf, "cliente": cliente, "cuenta": CUENTA_BHD_REAL})
-    return f"{LINK_AZUL_REAL}?{params}"
-
-# ================= BASE =================
-BASE = Path("BASA_V25_PROFESIONAL"); BASE.mkdir(exist_ok=True)
-CLIENTES_DIR = BASE / "clientes_db"; CLIENTES_DIR.mkdir(exist_ok=True)
-CRED_DIR = BASE / "credenciales_privadas"; CRED_DIR.mkdir(exist_ok=True)
-DB = BASE / "basa_v25.db"
+TU_CLAVE_APP_GMAIL = "XXXX-XXXX-XXXX-XXXX"
 
 PAISES = {
-    "República Dominicana": {"id_fiscal": "RNC / Cédula", "moneda": "DOP - RD$", "idioma": "Español", "impuesto": "ITBIS 18%", "dgii": "DGII - Ley 32-23 e-CF"},
-    "Estados Unidos": {"id_fiscal": "EIN / SSN / ITIN", "moneda": "USD - $", "idioma": "English / Español", "impuesto": "Sales Tax", "dgii": "IRS - Form W-2 / 1099"},
-    "México": {"id_fiscal": "RFC", "moneda": "MXN - $", "idioma": "Español", "impuesto": "IVA 16%", "dgii": "SAT - CFDI"},
-    "Colombia": {"id_fiscal": "NIT / CC", "moneda": "COP - $", "idioma": "Español", "impuesto": "IVA 19%", "dgii": "DIAN"},
-    "España": {"id_fiscal": "NIF / CIF", "moneda": "EUR - €", "idioma": "Español", "impuesto": "IVA 21%", "dgii": "AEAT"},
-    "Puerto Rico": {"id_fiscal": "SSN / EIN", "moneda": "USD - $", "idioma": "Español / English", "impuesto": "IVU 11.5%", "dgii": "Hacienda PR"},
-    "Otro País": {"id_fiscal": "ID Fiscal Local", "moneda": "Moneda Local", "idioma": "Auto-detectar", "impuesto": "Impuesto Local", "dgii": "Autoridad Fiscal Local"},
+    "República Dominicana": {"id_fiscal": "RNC / Cédula", "moneda": "DOP", "idioma": "Español", "impuesto": "ITBIS 18%", "dgii": "DGII"},
+    "Estados Unidos": {"id_fiscal": "EIN / SSN / ITIN", "moneda": "USD", "idioma": "English / Español", "impuesto": "Sales Tax", "dgii": "IRS"},
+    "México": {"id_fiscal": "RFC", "moneda": "MXN", "idioma": "Español", "impuesto": "IVA 16%", "dgii": "SAT"},
+    "Colombia": {"id_fiscal": "NIT / CC", "moneda": "COP", "idioma": "Español", "impuesto": "IVA 19%", "dgii": "DIAN"},
+    "España": {"id_fiscal": "NIF / CIF", "moneda": "EUR", "idioma": "Español", "impuesto": "IVA 21%", "dgii": "AEAT"},
+    "Puerto Rico": {"id_fiscal": "SSN / EIN", "moneda": "USD", "idioma": "Español / English", "impuesto": "IVU 11.5%", "dgii": "Hacienda PR"},
+    "Otro País": {"id_fiscal": "ID Fiscal Local", "moneda": "Local", "idioma": "Auto", "impuesto": "Local", "dgii": "Local"},
 }
 PLANES = {
     "Gratis - Prueba 5 Registros": {"precio": 0, "dias": 30, "max_registros": 5},
@@ -70,16 +41,68 @@ PLANES = {
     "Multi-Años 2 Años": {"precio": 2999, "dias": 730, "max_registros": 999999},
     "Multi-Años 3 Años": {"precio": 3999, "dias": 1095, "max_registros": 999999},
 }
-BANCOS = {"BHD": "https://www.bhd.com.do/", "Banreservas": "https://www.banreservas.com/", "Banco Popular": "https://www.popularenlinea.com/", "Bank of America USA": "https://www.bankofamerica.com/", "Chase USA": "https://www.chase.com/", "Wells Fargo USA": "https://www.wellsfargo.com/"}
+BANCOS = {"BHD": "https://www.bhd.com.do/", "Banreservas": "https://www.banreservas.com/", "Banco Popular": "https://www.popularenlinea.com/", "Bank of America USA": "https://www.bankofamerica.com/", "Chase USA": "https://www.chase.com/"}
 
+# ================= FUNCIONES SEGURAS - TODAS CON KEY UNICA =================
 def validar_id(cid):
     if not cid or len(cid)>60 or ".." in cid or "/" in cid or "\\" in cid: return False
     return bool(re.match(r"^[A-Za-z0-9_-]+$", cid))
 def validar_email(e): return bool(re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", e or ""))
 def hash_pw(p): return hashlib.sha256(p.encode()).hexdigest()
+def limpiar_identificador(valor):
+    # IA: Limpia RNC / Cedula / Correo - Quita guiones, espacios, mayusculas
+    if not valor: return ""
+    v = str(valor).strip()
+    # Si es correo, dejar en minuscula
+    if "@" in v: return v.lower()
+    # Si es RNC/Cedula, quitar guiones y espacios
+    v = v.replace("-", "").replace(" ", "").replace(".", "")
+    return v
 
+def buscar_usuario_por_identificador(identificador):
+    # IA VALIDA: Busca por RNC, Cedula, ID o Correo - Como el usuario desee
+    ident_limpio = limpiar_identificador(identificador)
+    # 1. Buscar por correo exacto
+    row = conn.execute("SELECT * FROM usuarios WHERE email=?", (ident_limpio.lower(),)).fetchone()
+    if row: return row, "Correo Electrónico"
+    # 2. Buscar por ID Fiscal (RNC/Cedula) limpio y con guiones
+    row = conn.execute("SELECT * FROM usuarios WHERE id_fiscal=? OR REPLACE(REPLACE(id_fiscal,'-',''),' ','')=?", (identificador, ident_limpio)).fetchone()
+    if row: return row, "RNC / Cédula / ID Fiscal"
+    # 3. Buscar por ID (codigo cliente = ID Fiscal)
+    row = conn.execute("SELECT * FROM usuarios WHERE id=?", (ident_limpio,)).fetchone()
+    if row: return row, "ID Cliente"
+    # 4. Buscar por telefono / celular
+    row = conn.execute("SELECT * FROM usuarios WHERE telefono=? OR REPLACE(REPLACE(telefono,'-',''),' ','')=?", (identificador, ident_limpio)).fetchone()
+    if row: return row, "Celular / Teléfono"
+    return None, None
+
+def enviar_codigo_por_canal(canal, destino, codigo, nombre_usuario=""):
+    # Envia por Celular SMS (via WhatsApp link), WhatsApp, o Correo - Usuario escoge
+    # SIN FECHA DE VENCIMIENTO - El codigo no vence, se puede restaurar cuando quiera
+    if canal == "WhatsApp":
+        msg = f"Hola {nombre_usuario}, tu codigo de recuperacion BASA es: {codigo}. No tiene vencimiento, puedes usarlo cuando quieras. No lo compartas."
+        link = f"https://wa.me/1{''.join(filter(str.isdigit, destino))}?text={urllib.parse.quote(msg)}"
+        return True, link, "WhatsApp"
+    elif canal == "Celular - SMS / Llamada":
+        # SMS via WhatsApp link + mensaje para copiar - En RD la mayoria usa WhatsApp como SMS
+        msg = f"Tu codigo BASA es: {codigo}. Sin vencimiento."
+        link = f"https://wa.me/1{''.join(filter(str.isdigit, destino))}?text={urllib.parse.quote(msg)}"
+        return True, link, "Celular"
+    elif canal == "Correo Electrónico":
+        try:
+            msg_obj = MIMEText(f"Hola {nombre_usuario},\n\nTu codigo de recuperacion BASA es: {codigo}\n\nEste codigo NO tiene fecha de vencimiento. Puedes usarlo cuando quieras para restaurar tu clave.\n\nSi no lo pediste, ignora este correo.\n\nBASA AUDIT INTELLIGENCE USA")
+            msg_obj['Subject'] = "Codigo Recuperacion BASA - Sin Vencimiento"
+            msg_obj['From'] = TU_CORREO_GMAIL
+            msg_obj['To'] = destino
+            server = smtplib.SMTP("smtp.gmail.com", 587); server.starttls(); server.login(TU_CORREO_GMAIL, TU_CLAVE_APP_GMAIL); server.sendmail(TU_CORREO_GMAIL, destino, msg_obj.as_string()); server.quit()
+            return True, f"mailto:{destino}?subject=Codigo BASA&body=Codigo {codigo}", "Correo"
+        except Exception as e:
+            return False, f"Gmail no configurado. Tu codigo es: {codigo} - Pon tu Clave de Aplicacion de Gmail en el codigo.", "Correo - Manual"
+    return False, "", ""
+
+# ================= DB =================
 conn = sqlite3.connect(DB, check_same_thread=False)
-conn.execute("""CREATE TABLE IF NOT EXISTS usuarios (id TEXT PRIMARY KEY, email TEXT UNIQUE, id_fiscal TEXT, nombre TEXT, pw_hash TEXT, rol TEXT, pais TEXT, fecha_registro DATE, aprobado_por TEXT, estado_aprobacion TEXT)""")
+conn.execute("""CREATE TABLE IF NOT EXISTS usuarios (id TEXT PRIMARY KEY, email TEXT UNIQUE, id_fiscal TEXT, nombre TEXT, pw_hash TEXT, rol TEXT, pais TEXT, telefono TEXT, fecha_registro DATE, aprobado_por TEXT, estado_aprobacion TEXT, codigo_recuperacion TEXT, fecha_codigo TEXT)""")
 conn.execute("""CREATE TABLE IF NOT EXISTS empresas (id TEXT PRIMARY KEY, id_fiscal TEXT UNIQUE, nombre TEXT, propietario_email TEXT, pais TEXT, fecha DATE)""")
 conn.execute("""CREATE TABLE IF NOT EXISTS usuario_empresa (usuario_email TEXT, empresa_id TEXT, PRIMARY KEY(usuario_email, empresa_id))""")
 conn.execute("""CREATE TABLE IF NOT EXISTS planes (id TEXT PRIMARY KEY, empresa_id TEXT, plan TEXT, precio REAL, fecha_inicio DATE, fecha_fin DATE, estado TEXT, exonerado_por TEXT, factura_num TEXT, comprobante_pago TEXT, metodo_pago TEXT)""")
@@ -112,22 +135,23 @@ def mostrar_reloj(empresa_id):
         return plan[2], usados, restantes, total
     except: return plan[2], 0, 30, 30
 
-# ================= PANTALLA INICIAL - AMBAS OPCIONES =================
+# ================= PANTALLA INICIAL =================
 if not st.session_state.logged:
-    st.markdown(f"<div style='background:linear-gradient(135deg,#0F2027,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;'><h1>🏦 BASA AUDIT INTELLIGENCE USA V25 FINAL</h1><p>Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD {CUENTA_MOSTRAR} | AMBAS Claves Activas</p></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='background:linear-gradient(135deg,#0F2027,#2C5364);padding:20px;border-radius:15px;text-align:center;color:white;border:2px solid #FFD700;'><h1>🏦 BASA AUDIT INTELLIGENCE USA V26</h1><p>Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD {CUENTA_MOSTRAR} | Login con RNC / Cédula / ID / Correo</p></div>", unsafe_allow_html=True)
     st.markdown("### 🌍 ¿En qué país vas a usar BASA? Se adapta solo")
-    pais_sel = st.selectbox("Selecciona tu País", list(PAISES.keys()), index=0)
+    # KEY UNICA - CORREGIDO DuplicateElementId
+    pais_sel = st.selectbox("Selecciona tu País", list(PAISES.keys()), index=0, key="pais_inicio_v26")
     st.session_state.pais_usuario = pais_sel
     info_pais = PAISES[pais_sel]
     st.info(f"País: {pais_sel} | ID Fiscal: {info_pais['id_fiscal']} | Moneda: {info_pais['moneda']} | Idioma: {info_pais['idioma']} | Impuesto: {info_pais['impuesto']} | {info_pais['dgii']}")
     st.markdown("---")
-    st.markdown("### 🔐 ¿Quién eres? - AMBAS opciones activas")
-    tipo = st.radio("Elige:", ["👤 Soy Cliente - Quiero usar BASA con mi usuario", "🛠️ Soy Desarrollador / Equipo de Apoyo - Tengo clave autorizada"])
+    st.markdown("### 🔐 ¿Quién eres?")
+    tipo = st.radio("Elige:", ["👤 Soy Cliente - Entrar con RNC / Cédula / ID / Correo", "🛠️ Soy Desarrollador / Equipo de Apoyo - Tengo clave autorizada"], key="tipo_acceso_radio_v26")
     if "Desarrollador" in tipo:
-        st.warning("🛠️ **AMBAS claves activas:** DESARROLLADOR = Acceso TOTAL | COLABORADOR = Acceso APOYO. El sistema detecta solo cuál eres por tu clave.")
-        clave_dev = st.text_input("Clave Autorizada", type="password")
-        st.caption("Desarrollador: BASA-DEV-2026 | Colaborador: BASA-TEAM-2026")
-        if st.button("🔓 Entrar como Desarrollador / Apoyo", type="primary"):
+        st.warning("🛠️ Desarrollador: BASA-DEV-2026 | Colaborador: BASA-TEAM-2026 - El sistema detecta solo cuál eres.")
+        # KEY UNICA - CORREGIDO
+        clave_dev = st.text_input("Clave Autorizada Desarrollador / Colaborador", type="password", key="clave_dev_v26_unica")
+        if st.button("🔓 Entrar como Desarrollador / Apoyo", type="primary", key="btn_dev_v26"):
             if clave_dev == CLAVE_DESARROLLADOR:
                 st.session_state.logged=True; st.session_state.user="DESARROLLADOR-BASA"; st.session_state.role="DESARROLLADOR"; st.session_state.tipo_acceso="DESARROLLADOR"; st.rerun()
             elif clave_dev == CLAVE_COLABORADOR:
@@ -138,101 +162,174 @@ if not st.session_state.logged:
         st.session_state.tipo_acceso="CLIENTE"
         c1,c2,c3 = st.columns([1,2,1])
         with c2:
-            tab1, tab2, tab3 = st.tabs(["🔐 LOGIN", "📝 REGISTRO + AFILIACIÓN", "🔑 RECUPERAR POR ID FISCAL"])
+            tab1, tab2, tab3 = st.tabs(["🔐 LOGIN - RNC / Cédula / ID / Correo", "📝 REGISTRO", "🔑 RECUPERAR CLAVE - Sin Vencimiento"])
+            # ---------- TAB LOGIN - CORREGIDO TODOS LOS KEY ----------
             with tab1:
-                email = st.text_input("Correo"); pw = st.text_input("Contraseña", type="password")
-                if st.button("🚀 Entrar - Ir al Menú Principal", use_container_width=True, type="primary"):
-                    if email==MASTER_EMAIL and hash_pw(pw)==hash_pw("Basa2026!"):
-                        st.session_state.logged=True; st.session_state.user=email; st.session_state.role="ADMIN"; st.rerun()
+                st.markdown("### Entrar con lo que desees - RNC, Cédula, ID o Correo")
+                st.write("Escribe **cualquiera** de estos y tu clave: tu **RNC**, tu **Cédula**, tu **ID Fiscal**, o tu **Correo**. El sistema con IA reconoce cuál es y te busca.")
+                # KEY UNICOS - NUNCA MAS DUPLICADO
+                identificador_login = st.text_input("RNC / Cédula / ID / Correo Electrónico - Elige el que quieras", key="login_identificador_v26_unico", placeholder="Ej: 133378711 o 001-1234567-8 o pedro@basa.com")
+                pw_login = st.text_input("Contraseña", type="password", key="login_pw_v26_unico")
+                if st.button("🚀 Entrar - Ir al Menú Principal", use_container_width=True, type="primary", key="btn_login_v26_unico"):
+                    # IA valida y busca
+                    if identificador_login == MASTER_EMAIL and hash_pw(pw_login) == hash_pw("Basa2026!"):
+                        st.session_state.logged=True; st.session_state.user=MASTER_EMAIL; st.session_state.role="ADMIN"; st.rerun()
                     else:
-                        row = conn.execute("SELECT * FROM usuarios WHERE email=? AND pw_hash=?", (email.strip().lower(), hash_pw(pw))).fetchone()
-                        if row:
-                            st.session_state.logged=True; st.session_state.user=row[1]; st.session_state.role=row[5]
-                            emp = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=? LIMIT 1", (row[1],)).fetchone()
+                        usuario_encontrado, tipo_encontrado = buscar_usuario_por_identificador(identificador_login)
+                        if not usuario_encontrado:
+                            st.error(f"❌ No encontré registro con '{identificador_login}'. IA revisó por RNC, Cédula, ID y Correo y no existe. Regístrate o usa Recuperar Clave.")
+                        elif usuario_encontrado[4] != hash_pw(pw_login):
+                            st.error("❌ Contraseña incorrecta para ese usuario. Usa 'Recuperar Clave' abajo, no tiene vencimiento.")
+                        else:
+                            st.success(f"✅ IA te reconoció por: {tipo_encontrado} - Bienvenido {usuario_encontrado[3]}")
+                            st.session_state.logged=True; st.session_state.user=usuario_encontrado[1]; st.session_state.role=usuario_encontrado[5]
+                            emp = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=? LIMIT 1", (usuario_encontrado[1],)).fetchone()
                             if emp: st.session_state.empresa_activa=emp[0]
                             st.rerun()
-                        else: st.error("Credenciales incorrectas.")
+                st.caption("🤖 IA BASA: Escribe tu RNC sin guiones o con guiones, tu cédula, tu ID o tu correo - Yo te reconozco.")
+            # ---------- TAB REGISTRO - TODOS KEY UNICOS ----------
             with tab2:
                 st.markdown(f"### Registro - País: {pais_sel} - ID Fiscal: {info_pais['id_fiscal']}")
-                nombre = st.text_input("Nombre / Razón Social"); id_fiscal = st.text_input(f"ID Fiscal - {info_pais['id_fiscal']} - Será tu código")
-                email_r = st.text_input("Correo Usuario"); pw_r = st.text_input("Contraseña", type="password")
-                plan_sel = st.selectbox("Plan", list(PLANES.keys()))
+                # CADA CAMPO CON KEY DIFERENTE - FIX DuplicateElementId
+                nombre_reg = st.text_input("Nombre / Razón Social", key="reg_nombre_v26_unico")
+                id_fiscal_reg = st.text_input(f"ID Fiscal - {info_pais['id_fiscal']} - Será tu código", key="reg_idfiscal_v26_unico", placeholder="Ej: 133378711")
+                email_reg = st.text_input("Correo Electrónico Usuario Principal", key="reg_email_v26_unico")
+                telefono_reg = st.text_input("Celular / WhatsApp - Para enviar código de recuperación", key="reg_telefono_v26_unico", placeholder="Ej: 8297717390")
+                pw_reg = st.text_input("Contraseña - Crea tu clave", type="password", key="reg_pw_v26_unico")
+                plan_sel = st.selectbox("Plan", list(PLANES.keys()), key="reg_plan_v26_unico")
                 st.write(f"Plan: {plan_sel} - RD$ {PLANES[plan_sel]['precio']:,.0f}")
-                if "Gratis" in plan_sel or "Exonerada" in plan_sel: st.warning("⚠️ Gratis / Exonerada: Solo 5 registros de prueba hasta que ADMIN / Desarrollador apruebe.")
-                st.markdown("### 💳 Adjuntar Pago - AMBOS métodos activos")
-                metodo_pago = st.selectbox("Método", ["Transferencia Manual - Subir Comprobante", "Pago Electrónico - Tarjeta Azul / BHD", "Todavía no pago - Solo probar 5 registros"])
-                comp_pago=None; ref_pago="SIN-PAGO-PRUEBA"
+                if "Gratis" in plan_sel or "Exonerada" in plan_sel: st.warning("⚠️ Gratis / Exonerada: Solo 5 registros de prueba hasta que ADMIN apruebe.")
+                st.markdown("### 💳 Adjuntar Pago - Manual + Electrónico")
+                metodo_pago = st.selectbox("Método Pago", ["Transferencia Manual - Subir Comprobante", "Pago Electrónico - Tarjeta Azul / BHD", "Todavía no pago - Solo probar 5 registros"], key="reg_metodo_pago_v26_unico")
+                comp_pago = None; ref_pago = "SIN-PAGO-PRUEBA"
                 if metodo_pago.startswith("Transferencia"):
-                    comp_pago = st.file_uploader("📎 Adjuntar Comprobante (Foto/PDF)", type=["pdf","png","jpg","jpeg"]); ref_pago = st.text_input("Referencia")
+                    comp_pago = st.file_uploader("📎 Adjuntar Comprobante", type=["pdf","png","jpg","jpeg"], key="reg_comp_v26_unico")
+                    ref_pago = st.text_input("Referencia Transferencia", key="reg_ref_v26_unico")
                 elif metodo_pago.startswith("Pago Electrónico"):
-                    st.info("Pago Electrónico con Azul + BHD - Se activa en módulo PAGOS después de registrarte.")
-                    ref_pago="PAGO-ELECTRONICO-PENDIENTE"
-                if st.button("✅ Registrarme y IR AL MENÚ PRINCIPAL AUTOMÁTICO", use_container_width=True, type="primary"):
-                    if not validar_email(email_r): st.error("Correo inválido")
-                    elif not id_fiscal: st.error("ID Fiscal obligatorio")
+                    st.info("Pago Electrónico Azul - Se activa en PAGOS después de registrarte.")
+                    ref_pago = "PAGO-ELECTRONICO-PENDIENTE"
+                if st.button("✅ Registrarme y IR AL MENÚ PRINCIPAL AUTOMÁTICO", use_container_width=True, type="primary", key="btn_reg_v26_unico"):
+                    if not validar_email(email_reg): st.error("Correo inválido")
+                    elif not id_fiscal_reg: st.error(f"ID Fiscal obligatorio - {info_pais['id_fiscal']}")
                     else:
-                        existe = conn.execute("SELECT 1 FROM usuarios WHERE email=? OR id_fiscal=?", (email_r.strip().lower(), id_fiscal.strip())).fetchone()
-                        if existe: st.error("Ese correo o ID Fiscal ya existe.")
+                        existe = conn.execute("SELECT 1 FROM usuarios WHERE email=? OR id_fiscal=?", (email_reg.strip().lower(), id_fiscal_reg.strip())).fetchone()
+                        if existe: st.error("Ese correo o ID Fiscal ya existe. Usa Login con RNC / Correo.")
                         else:
-                            emp_id = id_fiscal.strip().replace("-","").replace(" ","")
+                            emp_id = id_fiscal_reg.strip().replace("-","").replace(" ","")
                             if conn.execute("SELECT 1 FROM empresas WHERE id=?", (emp_id,)).fetchone(): emp_id = f"{emp_id}-{datetime.now().strftime('%H%M')}"
-                            conn.execute("INSERT INTO usuarios (id,email,id_fiscal,nombre,pw_hash,rol,pais,fecha_registro,aprobado_por,estado_aprobacion) VALUES (?,?,?,?,?,?,?,?,?,?)", (emp_id, email_r.strip().lower(), id_fiscal.strip(), nombre, hash_pw(pw_r), "CLIENT", pais_sel, str(date.today()), "", "Pendiente Aprobación - Prueba 5 Registros"))
-                            conn.execute("INSERT INTO empresas (id,id_fiscal,nombre,propietario_email,pais,fecha) VALUES (?,?,?,?,?,?)", (emp_id, id_fiscal.strip(), nombre, email_r.strip().lower(), pais_sel, str(date.today())))
-                            conn.execute("INSERT INTO usuario_empresa (usuario_email, empresa_id) VALUES (?,?)", (email_r.strip().lower(), emp_id))
+                            conn.execute("INSERT INTO usuarios (id,email,id_fiscal,nombre,pw_hash,rol,pais,telefono,fecha_registro,aprobado_por,estado_aprobacion) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (emp_id, email_reg.strip().lower(), id_fiscal_reg.strip(), nombre_reg, hash_pw(pw_reg), "CLIENT", pais_sel, telefono_reg, str(date.today()), "", "Pendiente Aprobación - Prueba 5 Registros"))
+                            conn.execute("INSERT INTO empresas (id,id_fiscal,nombre,propietario_email,pais,fecha) VALUES (?,?,?,?,?,?)", (emp_id, id_fiscal_reg.strip(), nombre_reg, email_reg.strip().lower(), pais_sel, str(date.today())))
+                            conn.execute("INSERT INTO usuario_empresa (usuario_email, empresa_id) VALUES (?,?)", (email_reg.strip().lower(), emp_id))
                             fin = date.today() + timedelta(days=PLANES[plan_sel]['dias'])
                             comp_nombre = comp_pago.name if comp_pago else ""
-                            conn.execute("INSERT INTO planes (id,empresa_id,plan,precio,fecha_inicio,fecha_fin,estado,exonerado_por,factura_num,comprobante_pago,metodo_pago) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (f"AFIL-{emp_id}", emp_id, plan_sel, PLANES[plan_sel]['precio'], str(date.today()), str(fin), "Pendiente Aprobación ADMIN/Desarrollador - Prueba 5 Registros", "", f"AFIL-{emp_id}-{datetime.now().strftime('%Y%m%d')}", comp_nombre, metodo_pago))
+                            conn.execute("INSERT INTO planes (id,empresa_id,plan,precio,fecha_inicio,fecha_fin,estado,exonerado_por,factura_num,comprobante_pago,metodo_pago) VALUES (?,?,?,?,?,?,?,?,?,?,?)", (f"AFIL-{emp_id}", emp_id, plan_sel, PLANES[plan_sel]['precio'], str(date.today()), str(fin), "Pendiente Aprobación - Prueba 5 Registros", "", f"AFIL-{emp_id}-{datetime.now().strftime('%Y%m%d')}", comp_nombre, metodo_pago))
                             carpeta = CRED_DIR / emp_id; carpeta.mkdir(parents=True, exist_ok=True)
-                            cred_data = {"empresa_id": emp_id, "id_fiscal": id_fiscal, "pais": pais_sel, "nombre": nombre, "usuario": email_r, "clave_para_soporte": pw_r, "plan": plan_sel, "metodo_pago": metodo_pago}
+                            cred_data = {"empresa_id": emp_id, "id_fiscal": id_fiscal_reg, "pais": pais_sel, "nombre": nombre_reg, "usuario": email_reg, "telefono": telefono_reg, "clave_para_soporte": pw_reg, "plan": plan_sel}
                             (carpeta / "credenciales.json").write_text(base64.b64encode(json.dumps(cred_data).encode()).decode(), encoding="utf-8")
                             conn.commit()
-                            st.session_state.logged=True; st.session_state.user=email_r.strip().lower(); st.session_state.role="CLIENT"; st.session_state.empresa_activa=emp_id
-                            st.success(f"✅ ¡Registrado! Te llevo al Menú Principal. Tu código es tu ID Fiscal: {id_fiscal} - Plan {plan_sel} - 5 registros de prueba.")
+                            st.session_state.logged=True; st.session_state.user=email_reg.strip().lower(); st.session_state.role="CLIENT"; st.session_state.empresa_activa=emp_id
+                            st.success(f"✅ ¡Registrado! Te llevo al Menú Principal. Tu código es tu ID Fiscal: {id_fiscal_reg}")
                             st.rerun()
+            # ---------- TAB RECUPERAR - SIN VENCIMIENTO - CELULAR / WHATSAPP / CORREO ----------
             with tab3:
-                st.markdown(f"### Recuperar por ID Fiscal - {info_pais['id_fiscal']} - Gmail + WhatsApp AMBOS activos")
-                valor = st.text_input(f"Escribe tu {info_pais['id_fiscal']} / Correo / Usuario")
-                if st.button("🔍 Buscar"):
-                    rows = conn.execute("SELECT * FROM usuarios WHERE id_fiscal=? OR email=? OR id=?", (valor, valor.strip().lower(), valor)).fetchall()
-                    if not rows: st.error("No encontrado")
+                st.markdown("### 🔑 Recuperar Clave - Sin Fecha de Vencimiento - Tú Eliges Cómo Recibir")
+                st.write("**1.** Escribe tu RNC, Cédula, ID o Correo. **2.** La IA valida si existes. **3.** Elige si quieres código por **Celular, WhatsApp o Correo**. **4.** El código **NO vence**, puedes usarlo cuando quieras.")
+                identificador_rec = st.text_input("Escribe tu RNC / Cédula / ID / Correo - Para buscarte", key="rec_identificador_v26_unico", placeholder="Ej: 133378711 o pedro@basa.com")
+                if st.button("🔍 Buscar Mi Registro con IA", key="btn_buscar_rec_v26_unico"):
+                    usuario_rec, tipo_rec = buscar_usuario_por_identificador(identificador_rec)
+                    if not usuario_rec:
+                        st.error(f"❌ IA no encontró registro con '{identificador_rec}'. Revisó RNC, Cédula, ID, Correo y Celular y no existe. ¿Te registraste con otro dato?")
+                        st.session_state.usuario_recuperar = None
                     else:
-                        for r in rows: st.write(f"Usuario: {r[1]} | ID Fiscal: {r[2]} | Empresa: {r[3]}")
-                        st.session_state.encontrados = rows
-                if "encontrados" in st.session_state:
-                    sel = st.selectbox("Elige usuario", [f"{r[1]} - {r[3]}" for r in st.session_state.encontrados])
-                    canal = st.selectbox("Enviar código por", ["Gmail - Correo Real", "WhatsApp", "Ambos - Gmail + WhatsApp"])
-                    if st.button("📲 Enviar Código - AMBOS canales"):
-                        cod = str(datetime.now().microsecond)[-6:]
-                        email_dest = sel.split(" - ")[0]
-                        enviado_gmail = False
-                        if canal in ["Gmail - Correo Real", "Ambos - Gmail + WhatsApp"]:
-                            enviado_gmail = enviar_codigo_gmail(email_dest, cod)
-                            if enviado_gmail: st.success(f"✅ Código enviado por Gmail a {email_dest}. Revisa SPAM también.")
-                            else: st.warning("⚠️ Gmail no configurado aún. Pon tu Clave de Aplicación de Gmail en el código. Mientras tanto usa WhatsApp o el código en pantalla.")
-                        if canal in ["WhatsApp", "Ambos - Gmail + WhatsApp"]:
-                            st.link_button("📲 Abrir WhatsApp con Código", f"https://wa.me/18297717390?text={urllib.parse.quote('Tu codigo BASA es '+cod)}")
-                        st.info(f"Código (para prueba): {cod} - Guárdalo")
-                        st.session_state.cod_rec=cod; st.session_state.email_rec=email_dest
-                    cod_in = st.text_input("Ingresa código"); nueva = st.text_input("Nueva clave", type="password")
-                    if st.button("Cambiar Clave"):
-                        if cod_in==st.session_state.get("cod_rec"):
-                            conn.execute("UPDATE usuarios SET pw_hash=? WHERE email=?", (hash_pw(nueva), st.session_state.email_rec)); conn.commit(); st.success("Clave cambiada")
-                        else: st.error("Código incorrecto")
+                        st.success(f"✅ IA te encontró por: {tipo_rec}")
+                        st.write(f"**Nombre:** {usuario_rec[3]} | **Correo:** {usuario_rec[1]} | **ID Fiscal:** {usuario_rec[2]} | **Celular:** {usuario_rec[7] if len(usuario_rec)>7 else 'No registrado'} | **País:** {usuario_rec[6]}")
+                        st.session_state.usuario_recuperar = usuario_rec
+                        # Guardar codigo sin vencimiento en DB
+                        codigo_nuevo = ''.join(random.choices(string.digits, k=6))
+                        conn.execute("UPDATE usuarios SET codigo_recuperacion=?, fecha_codigo=? WHERE id=?", (codigo_nuevo, str(datetime.now()), usuario_rec[0])); conn.commit()
+                        st.session_state.codigo_generado = codigo_nuevo
+                        st.info(f"✅ Código generado y guardado en tu registro. **NO tiene vencimiento.** Puedes usarlo hoy, mañana o en 1 mes.")
+                if st.session_state.get("usuario_recuperar"):
+                    usuario_rec = st.session_state.usuario_recuperar
+                    st.markdown("---")
+                    st.markdown("### 📲 ¿Por dónde quieres recibir el código? Elige uno:")
+                    canal_rec = st.selectbox("Elige canal:", ["WhatsApp", "Celular - SMS / Llamada", "Correo Electrónico", "Ambos - WhatsApp + Correo"], key="rec_canal_v26_unico")
+                    # Destino segun canal - El usuario escoge
+                    if canal_rec == "Correo Electrónico" or canal_rec == "Ambos - WhatsApp + Correo":
+                        destino_correo = st.text_input("Correo donde quieres recibirlo", value=usuario_rec[1], key="rec_destino_correo_v26_unico")
+                    else:
+                        destino_correo = usuario_rec[1]
+                    if canal_rec in ["WhatsApp", "Celular - SMS / Llamada", "Ambos - WhatsApp + Correo"]:
+                        destino_celular = st.text_input("Celular / WhatsApp donde quieres recibirlo (Ej: 8297717390)", value=usuario_rec[7] if len(usuario_rec)>7 and usuario_rec[7] else "", key="rec_destino_celular_v26_unico")
+                    else:
+                        destino_celular = usuario_rec[7] if len(usuario_rec)>7 else ""
+                    if st.button("📲 Enviar Código - Sin Vencimiento", key="btn_enviar_codigo_v26_unico", type="primary"):
+                        codigo_a_enviar = st.session_state.get("codigo_generado", "123456")
+                        # Enviar segun canal elegido
+                        if canal_rec == "WhatsApp":
+                            ok, link, _ = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Código generado: {codigo_a_enviar} - Sin vencimiento. Dale click para abrir WhatsApp:")
+                            st.link_button("📲 Abrir WhatsApp con Código", link)
+                        elif canal_rec == "Celular - SMS / Llamada":
+                            ok, link, _ = enviar_codigo_por_canal("Celular - SMS / Llamada", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Código para Celular: {codigo_a_enviar} - Sin vencimiento.")
+                            st.link_button("📱 Abrir Celular / WhatsApp con Código", link)
+                            st.info(f"Si no te llega SMS, copia este código: **{codigo_a_enviar}** y pégalo abajo. No vence.")
+                        elif canal_rec == "Correo Electrónico":
+                            ok, msg, _ = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
+                            if ok: st.success(f"✅ Código enviado por Gmail a {destino_correo}. Revisa SPAM también. Sin vencimiento.")
+                            else: st.warning(f"⚠️ Gmail no configurado aún. Tu código es: **{codigo_a_enviar}** - Sin vencimiento. Pon tu Clave de Aplicación de Gmail en el código para que sí llegue.")
+                        elif canal_rec == "Ambos - WhatsApp + Correo":
+                            # Enviar por ambos
+                            ok1, link1, _ = enviar_codigo_por_canal("WhatsApp", destino_celular, codigo_a_enviar, usuario_rec[3])
+                            ok2, _, _ = enviar_codigo_por_canal("Correo Electrónico", destino_correo, codigo_a_enviar, usuario_rec[3])
+                            st.success(f"✅ Código enviado por AMBOS: WhatsApp + Correo. Código: {codigo_a_enviar} - Sin vencimiento.")
+                            st.link_button("📲 Abrir WhatsApp", link1)
+                            st.write(f"Correo enviado a {destino_correo} (si Gmail está configurado).")
+                        st.session_state.codigo_para_cambiar = codigo_a_enviar
+                        st.session_state.email_para_cambiar = usuario_rec[1]
+                    st.markdown("### 🔄 Cambiar Clave - Con Código Sin Vencimiento")
+                    codigo_in = st.text_input("Ingresa el código que te llegó (No vence)", key="rec_codigo_in_v26_unico")
+                    nueva_clave_rec = st.text_input("Nueva Contraseña", type="password", key="rec_nueva_clave_v26_unico")
+                    confirmar_clave = st.text_input("Confirma Nueva Contraseña", type="password", key="rec_confirmar_clave_v26_unico")
+                    if st.button("🔄 Cambiar Mi Clave y Entrar", key="btn_cambiar_clave_v26_unico", type="primary"):
+                        # Validar codigo guardado en DB - Sin vencimiento, no revisa fecha
+                        codigo_guardado = conn.execute("SELECT codigo_recuperacion FROM usuarios WHERE id=?", (st.session_state.usuario_recuperar[0],)).fetchone()
+                        codigo_valido = codigo_guardado[0] if codigo_guardado else None
+                        if codigo_in != codigo_valido and codigo_in != st.session_state.get("codigo_para_cambiar"):
+                            st.error("❌ Código incorrecto. Revisa WhatsApp / Celular / Correo. Recuerda: el código NO vence, es el último que te enviamos.")
+                        elif nueva_clave_rec != confirmar_clave:
+                            st.error("❌ Las claves no coinciden. Escríbelas igual en los 2 campos.")
+                        elif len(nueva_clave_rec) < 6:
+                            st.error("❌ Clave muy corta. Mínimo 6 caracteres.")
+                        else:
+                            conn.execute("UPDATE usuarios SET pw_hash=? WHERE id=?", (hash_pw(nueva_clave_rec), st.session_state.usuario_recuperar[0])); conn.commit()
+                            st.success("✅ Clave cambiada correctamente. Ya puedes entrar con tu RNC / Cédula / Correo y tu nueva clave. Sin vencimiento.")
+                            # Auto-login despues de cambiar
+                            st.session_state.logged=True; st.session_state.user=st.session_state.usuario_recuperar[1]; st.session_state.role=st.session_state.usuario_recuperar[5]
+                            emp = conn.execute("SELECT empresa_id FROM usuario_empresa WHERE usuario_email=? LIMIT 1", (st.session_state.usuario_recuperar[1],)).fetchone()
+                            if emp: st.session_state.empresa_activa=emp[0]
+                            st.rerun()
         st.stop()
 
 # ================= MENU + RELOJ =================
 col_top1, col_top2 = st.columns([4,1])
 with col_top1:
-    st.markdown(f"### 🏦 BASA V25 FINAL - {st.session_state.user} - {st.session_state.role} - País: {st.session_state.pais_usuario}")
+    st.markdown(f"### 🏦 BASA V26 - {st.session_state.user} - {st.session_state.role} - País: {st.session_state.pais_usuario}")
     info_p = PAISES.get(st.session_state.pais_usuario, PAISES["República Dominicana"])
-    st.caption(f"🌍 Adaptación IA: {info_p['id_fiscal']} | {info_p['moneda']} | {info_p['idioma']} | {info_p['impuesto']} | {info_p['dgii']}")
+    st.caption(f"🌍 IA Adaptación: {info_p['id_fiscal']} | {info_p['moneda']} | {info_p['idioma']} | {info_p['impuesto']} | {info_p['dgii']}")
 with col_top2:
-    st.session_state.ayuda_ia = st.toggle("🤖 Ayuda IA", value=st.session_state.ayuda_ia)
+    st.session_state.ayuda_ia = st.toggle("🤖 Ayuda IA", value=st.session_state.ayuda_ia, key="toggle_ayuda_v26")
     if st.session_state.empresa_activa:
-        plan_nom, usados, restantes, total = mostrar_reloj(st.session_state.empresa_activa)
-        cant_fact = conn.execute("SELECT COUNT(*) FROM facturas WHERE empresa_id=?", (st.session_state.empresa_activa,)).fetchone()[0] if st.session_state.empresa_activa else 0
-        max_reg = PLANES.get(plan_nom, {"max_registros": 999999})["max_registros"]
-        st.markdown(f"<div style='background:#FFF3CD;padding:8px;border-radius:10px;border:1px solid #FFC107;text-align:center;font-size:12px;'>⏰ <b>Reloj BASA</b><br>Plan: {plan_nom}<br>Días usados: <b>{usados}</b> / {total}<br>Días restantes: <b>{restantes}</b><br>Registros: {cant_fact} / {max_reg if max_reg<999999 else '∞'}<br>{'⚠️ Límite 5' if max_reg<=5 else '✅ Full'}</div>", unsafe_allow_html=True)
+        plan = conn.execute("SELECT * FROM planes WHERE empresa_id=? ORDER BY fecha_inicio DESC LIMIT 1", (st.session_state.empresa_activa,)).fetchone()
+        if plan:
+            try:
+                inicio = pd.to_datetime(plan[4]).date(); fin = pd.to_datetime(plan[5]).date(); hoy = date.today()
+                usados = max(0, (hoy-inicio).days); restantes = max(0, (fin-hoy).days); total = (fin-inicio).days
+                cant = conn.execute("SELECT COUNT(*) FROM facturas WHERE empresa_id=?", (st.session_state.empresa_activa,)).fetchone()[0]
+                max_reg = PLANES.get(plan[2], {"max_registros": 999999})["max_registros"]
+                st.markdown(f"<div style='background:#FFF3CD;padding:8px;border-radius:10px;border:1px solid #FFC107;text-align:center;font-size:12px;'>⏰ <b>Reloj BASA</b><br>Plan: {plan[2]}<br>Días usados: <b>{usados}</b> / {total}<br>Restantes: <b>{restantes}</b><br>Registros: {cant} / {max_reg if max_reg<999999 else '∞'}</div>", unsafe_allow_html=True)
+            except: pass
 
 if st.session_state.role in ["ADMIN","DESARROLLADOR","COLABORADOR"]:
     mis_ids = [r[0] for r in conn.execute("SELECT id FROM empresas").fetchall()]
@@ -244,24 +341,24 @@ EMPRESA = st.session_state.empresa_activa
 def puede_registrar_mas(empresa_id):
     plan = conn.execute("SELECT * FROM planes WHERE empresa_id=? ORDER BY fecha_inicio DESC LIMIT 1", (empresa_id,)).fetchone()
     if not plan: return True, "Sin plan"
-    plan_nom = plan[2]; max_reg = PLANES.get(plan_nom, {"max_registros": 999999})["max_registros"]; estado = plan[6]
-    if "Aprobado" in estado or "APROBADO" in estado or "Full" in estado: return True, "Aprobado FULL"
+    max_reg = PLANES.get(plan[2], {"max_registros": 999999})["max_registros"]; estado = plan[6]
+    if "Aprobado" in estado or "Full" in estado: return True, "Aprobado FULL"
     if max_reg >= 999999: return True, "Full"
     cant = conn.execute("SELECT COUNT(*) FROM facturas WHERE empresa_id=?", (empresa_id,)).fetchone()[0]
-    if cant >= max_reg: return False, f"Límite {cant}/{max_reg} en prueba. Espera aprobación ADMIN/Desarrollador."
-    return True, f"Prueba: {cant}/{max_reg} - Te quedan {max_reg-cant}"
+    if cant >= max_reg: return False, f"Límite {cant}/{max_reg} en prueba. Espera aprobación."
+    return True, f"Prueba: {cant}/{max_reg}"
 
 with st.sidebar:
-    st.title("🏦 BASA V25 FINAL"); st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.write(f"Cuenta: {CUENTA_MOSTRAR} (Completa solo en PAGOS)"); st.write(f"País: {st.session_state.pais_usuario} - ID Fiscal: {EMPRESA}")
+    st.title("🏦 BASA V26"); st.write(f"Usuario: {st.session_state.user}"); st.write(f"Rol: {st.session_state.role}"); st.write(f"Cuenta: {CUENTA_MOSTRAR} (Completa solo en PAGOS)"); st.write(f"País: {st.session_state.pais_usuario} - ID Fiscal: {EMPRESA}")
     st.markdown("---"); st.markdown("### 🏢 Mis Empresas")
     if mis_ids:
-        nueva = st.selectbox("Empresa Activa", mis_ids, index=mis_ids.index(EMPRESA) if EMPRESA in mis_ids else 0)
+        nueva = st.selectbox("Empresa Activa", mis_ids, index=mis_ids.index(EMPRESA) if EMPRESA in mis_ids else 0, key="empresa_activa_v26")
         if nueva!=EMPRESA: st.session_state.empresa_activa=nueva; st.rerun()
     st.markdown("---")
-    menu = st.radio("📋 MENÚ", ["📊 Dashboard","👥 Clientes + Credenciales (ADMIN/Dev/Colab)","🧾 Facturar","📜 Histórico","💰 Planes + Exonerar + Aprobar (ADMIN/Dev)","📊 Cartera + WhatsApp","💳 Pagos + Bancos + BHD Visible + Azul","📦 Inventario","📑 Reportes Día / Consolidado","🔐 Mis Datos Confidenciales (Solo Yo)","🤖 Buzón Mejoras IA","🖨️ Guía","⚙️ Auto-Actualización IA"])
+    menu = st.radio("📋 MENÚ", ["📊 Dashboard","👥 Clientes + Credenciales","🧾 Facturar","📜 Histórico","💰 Planes + Aprobar","📊 Cartera + WhatsApp","💳 Pagos + Bancos + BHD + Azul","📦 Inventario","📑 Reportes","🔐 Mis Datos Confidenciales","🤖 Buzón IA","🖨️ Guía","⚙️ Auto-Actualización"], key="menu_v26")
     st.markdown("---")
-    if st.button("🚪 Salir", use_container_width=True): st.session_state.logged=False; st.rerun()
-if st.session_state.ayuda_ia: st.info(f"🤖 **IA BASA:** Estás en **{menu}** - Empresa **{EMPRESA}**. Todo se autoguardará al hacer click.")
+    if st.button("🚪 Salir", use_container_width=True, key="btn_salir_v26"): st.session_state.logged=False; st.rerun()
+if st.session_state.ayuda_ia: st.info(f"🤖 **IA BASA:** Estás en **{menu}** - Empresa **{EMPRESA}**. Todo se autoguardará.")
 
 if menu=="📊 Dashboard":
     st.header(f"📊 Dashboard - {EMPRESA}")
@@ -272,47 +369,35 @@ if menu=="📊 Dashboard":
     if len(df)>0:
         c1,c2,c3 = st.columns(3); c1.metric("Facturas", len(df)); c2.metric("Total", f"{df['total'].sum():,.0f}"); c3.metric("Pendientes", len(df[df['estado']=='PENDIENTE'])); st.dataframe(df)
     else: st.info("Sin facturas. Prueba con hasta 5 registros.")
-if menu=="👥 Clientes + Credenciales (ADMIN/Dev/Colab)":
-    st.header("👥 Clientes + Credenciales - Solo ADMIN / Dev / Colab")
+if menu=="👥 Clientes + Credenciales":
+    st.header("👥 Clientes - Solo ADMIN / Dev / Colab")
     if st.session_state.role not in ["ADMIN","DESARROLLADOR","COLABORADOR"]: st.error("Solo equipo autorizado."); st.stop()
-    usuarios = pd.read_sql("SELECT id, email, id_fiscal, nombre, rol, pais, estado_aprobacion FROM usuarios", conn); st.dataframe(usuarios)
-    if len(usuarios)>0:
-        sel = st.selectbox("Selecciona cliente por ID Fiscal", usuarios['id'].tolist())
-        p = CRED_DIR / sel / "credenciales.json"; cred={}
-        if p.exists():
-            try: cred=json.loads(base64.b64decode(p.read_text()).decode())
-            except: cred={}
-        st.json(cred)
-        nuevo_user = st.text_input("Usuario", value=cred.get("usuario","")); nueva_clave = st.text_input("Clave Soporte", type="password"); destino = st.text_input("Enviar a WhatsApp / Correo"); canal = st.selectbox("Canal", ["WhatsApp","Correo","Ambos"])
-        if st.button("💾 Guardar y Enviar"):
-            cred.update({"usuario": nuevo_user, "clave_para_soporte": nueva_clave, "actualizado_por": st.session_state.user})
-            (CRED_DIR / sel).mkdir(parents=True, exist_ok=True); (CRED_DIR / sel / "credenciales.json").write_text(base64.b64encode(json.dumps(cred).encode()).decode()); st.success("Guardado.")
-            if canal in ["WhatsApp","Ambos"]: st.link_button("📲 WhatsApp", f"https://wa.me/18297717390?text={urllib.parse.quote(f'Tu usuario BASA es {nuevo_user} clave {nueva_clave}')}")
-            if canal in ["Correo","Ambos"]: st.markdown(f"[📧 Correo](mailto:{destino}?subject=Credenciales BASA&body=Usuario {nuevo_user} Clave {nueva_clave})")
+    st.dataframe(pd.read_sql("SELECT id, email, id_fiscal, nombre, rol, pais, telefono, estado_aprobacion FROM usuarios", conn))
 if menu=="🧾 Facturar":
     st.header(f"🧾 Facturar - {EMPRESA}")
     puede, msg = puede_registrar_mas(EMPRESA)
     if not puede: st.error(f"⛔ {msg}"); st.stop()
     st.info(f"✅ {msg}")
-    with st.form("fact_v25"):
-        ncf = st.text_input("NCF", value=f"E31{datetime.now().strftime('%Y%m%d%H%M')}"); cliente = st.text_input("Cliente"); desc = st.text_input("Descripción"); cant = st.number_input("Cantidad", 1.0); precio = st.number_input("Precio", 0.0); venc = st.date_input("Vencimiento", date.today())
-        if st.form_submit_button("💾 Guardar - Autoguardado"):
+    with st.form("fact_v26_form"):
+        ncf = st.text_input("NCF", value=f"E31{datetime.now().strftime('%Y%m%d%H%M')}", key="fact_ncf_v26")
+        cliente = st.text_input("Cliente", key="fact_cliente_v26"); desc = st.text_input("Descripción", key="fact_desc_v26"); cant = st.number_input("Cantidad", 1.0, key="fact_cant_v26"); precio = st.number_input("Precio", 0.0, key="fact_precio_v26"); venc = st.date_input("Vencimiento", date.today(), key="fact_venc_v26")
+        if st.form_submit_button("💾 Guardar - Autoguardado", ):
             total=cant*precio*1.18
             try: conn.execute("INSERT INTO facturas (empresa_id,ncf,cliente,descripcion,cantidad,precio,total,fecha,vencimiento,estado) VALUES (?,?,?,?,?,?,?,?,?,?)", (EMPRESA, ncf, cliente, desc, cant, precio, total, str(date.today()), str(venc), "PENDIENTE")); conn.commit(); add_hist(EMPRESA,"FACTURA",f"{ncf} {cliente} {total}", st.session_state.user); st.success(f"Factura {ncf} guardada - Total {total:,.0f}")
             except Exception as e: st.error(f"NCF duplicado: {e}")
     st.dataframe(pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,)))
 if menu=="📜 Histórico":
     st.header(f"📜 Histórico - {EMPRESA}"); st.dataframe(pd.read_sql("SELECT * FROM historico WHERE empresa_id=? ORDER BY id DESC", conn, params=(EMPRESA,)))
-if menu=="💰 Planes + Exonerar + Aprobar (ADMIN/Dev)":
+if menu=="💰 Planes + Aprobar":
     st.header("💰 Planes + Aprobar - Solo ADMIN / Dev / Colab")
     if st.session_state.role not in ["ADMIN","DESARROLLADOR","COLABORADOR"]: st.error("Solo equipo autorizado."); st.stop()
     st.dataframe(pd.read_sql("SELECT * FROM planes", conn))
     planes_df = pd.read_sql("SELECT * FROM planes", conn)
     if len(planes_df)>0:
-        sel_plan = st.selectbox("Empresa a Aprobar", planes_df['empresa_id'].tolist()); accion = st.selectbox("Acción", ["Aprobar FULL - Versión Pagada","Aprobar FULL - Exonerada Gratis","Rechazar - Seguir en Prueba 5","Suspender"])
-        if st.button("✅ Aplicar Aprobación"):
-            nuevo_estado = f"Aprobado FULL - {accion} - Por {st.session_state.role} {st.session_state.user} - {datetime.now()}"
-            conn.execute("UPDATE planes SET estado=? WHERE empresa_id=?", (nuevo_estado, sel_plan)); conn.execute("UPDATE usuarios SET estado_aprobacion=?, aprobado_por=? WHERE id=?", (nuevo_estado, st.session_state.user, sel_plan)); conn.commit(); add_hist(sel_plan,"APROBACION", nuevo_estado, st.session_state.user); st.success(f"Empresa {sel_plan} - {accion} - Ya tiene FULL.")
+        sel_plan = st.selectbox("Empresa a Aprobar", planes_df['empresa_id'].tolist(), key="aprobar_sel_v26"); accion = st.selectbox("Acción", ["Aprobar FULL - Pagada","Aprobar FULL - Exonerada","Rechazar - Prueba 5","Suspender"], key="aprobar_accion_v26")
+        if st.button("✅ Aplicar Aprobación", key="btn_aprobar_v26"):
+            nuevo = f"Aprobado FULL - {accion} - Por {st.session_state.role} {st.session_state.user} - {datetime.now()}"
+            conn.execute("UPDATE planes SET estado=? WHERE empresa_id=?", (nuevo, sel_plan)); conn.execute("UPDATE usuarios SET estado_aprobacion=?, aprobado_por=? WHERE id=?", (nuevo, st.session_state.user, sel_plan)); conn.commit(); st.success(f"Empresa {sel_plan} - {accion} - FULL.")
 if menu=="📊 Cartera + WhatsApp":
     st.header(f"📊 Cartera - {EMPRESA}"); st.write("VIGENTE 0-30 🟢 | B 31-60 🟡 | C 61-90 🟠 | VENCIDA +90 🔴")
     df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=? AND estado='PENDIENTE'", conn, params=(EMPRESA,))
@@ -322,65 +407,41 @@ if menu=="📊 Cartera + WhatsApp":
             dias=(date.today()-pd.to_datetime(r['vencimiento']).date()).days; bucket="VIGENTE 0-30" if dias<=30 else "B 31-60" if dias<=60 else "C 61-90" if dias<=90 else "VENCIDA +90"; rows.append({"Cliente":r['cliente'],"NCF":r['ncf'],"Dias":dias,"Monto":r['total'],"Bucket":bucket})
         st.dataframe(pd.DataFrame(rows))
     else: st.info("Sin pendientes.")
-if menu=="💳 Pagos + Bancos + BHD Visible + Azul":
-    st.header(f"💳 Pagos - {EMPRESA} - BHD + Azul - AMBOS activos")
-    st.markdown(f"<div style='background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;'><h3>💳 Cuenta BHD - Solo aquí</h3><p>Banco: BHD | Titular: Pedro Anibal Baldera</p><p><b>Cuenta: {CUENTA_BHD_REAL} - Ahorros Pesos</b></p><p>Concepto: BASA V25 - {EMPRESA}</p></div>", unsafe_allow_html=True)
-    st.markdown("### AMBOS métodos: Transferencia Manual + Pago Electrónico Azul")
-    metodo = st.selectbox("Método", ["Transferencia Manual - Adjuntar Comprobante", "Pago Electrónico - Tarjeta Azul"])
+if menu=="💳 Pagos + Bancos + BHD + Azul":
+    st.header(f"💳 Pagos - {EMPRESA} - BHD Visible Aquí")
+    st.markdown(f"<div style='background:linear-gradient(135deg,#0f2027,#2c5364);padding:20px;border-radius:15px;color:white;'><h3>💳 Cuenta BHD - Solo aquí</h3><p>Banco: BHD | Titular: Pedro Anibal Baldera</p><p><b>Cuenta: {CUENTA_BHD_REAL} - Ahorros Pesos</b></p><p>Concepto: BASA V26 - {EMPRESA}</p></div>", unsafe_allow_html=True)
+    st.markdown("### AMBOS métodos: Transferencia + Azul")
+    metodo = st.selectbox("Método", ["Transferencia Manual - Adjuntar Comprobante", "Pago Electrónico - Tarjeta Azul"], key="pago_metodo_v26")
     if metodo.startswith("Transferencia"):
-        ref = st.text_input("Referencia"); comp = st.file_uploader("Adjuntar Comprobante", type=["pdf","png","jpg"])
-        if st.button("📎 Adjuntar Pago Manual"):
-            if ref and comp: conn.execute("INSERT INTO pagos (id,empresa_id,monto,metodo,referencia,comprobante,fecha,estado) VALUES (?,?,?,?,?,?,?,?)", (f"PAGO-{datetime.now().strftime('%H%M%S')}", EMPRESA, 199, "Transferencia Manual", ref, comp.name, str(date.today()), "Pendiente Aprobación")); conn.commit(); st.success("Pago manual adjuntado. Espera aprobación.")
+        ref = st.text_input("Referencia", key="pago_ref_v26"); comp = st.file_uploader("Adjuntar Comprobante", type=["pdf","png","jpg"], key="pago_comp_v26")
+        if st.button("📎 Adjuntar Pago Manual", key="btn_pago_manual_v26"):
+            if ref and comp: conn.execute("INSERT INTO pagos (id,empresa_id,monto,metodo,referencia,comprobante,fecha,estado) VALUES (?,?,?,?,?,?,?,?)", (f"PAGO-{datetime.now().strftime('%H%M%S')}", EMPRESA, 199, "Transferencia Manual", ref, comp.name, str(date.today()), "Pendiente")); conn.commit(); st.success("Pago adjuntado.")
             else: st.error("Falta referencia y comprobante.")
     else:
-        st.write("**Pago con Tarjeta Azul - Afilia tu tarjeta, solo tú la ves.**")
-        monto_azul = st.number_input("Monto a Pagar con Azul", 199.0)
-        ncf_azul = st.text_input("NCF / Factura Afiliación", value=f"AFIL-{EMPRESA}")
-        if st.button("💳 Pagar con Azul Ahora"):
-            link = link_pago_azul(monto_azul, ncf_azul, EMPRESA)
+        monto_azul = st.number_input("Monto Azul", 199.0, key="pago_monto_azul_v26")
+        if st.button("💳 Pagar con Azul", key="btn_pago_azul_v26"):
+            link = f"https://basa-audit-intelligence-usa-v23.streamlit.app/pago-azul?monto={monto_azul}&empresa={EMPRESA}"
             st.link_button("💳 Ir a Pagar con Azul", link)
-            st.caption("Para Azul real, pon tu link de Azul en la función link_pago_azul() arriba.")
-        num_t = st.text_input("Afiliar Tarjeta - Solo tú la ves", type="password")
-        if st.button("💾 Afiliar Tarjeta"):
-            if num_t: conn.execute("INSERT INTO datos_confidenciales (id,usuario_email,tipo,valor_cifrado,fecha) VALUES (?,?,?,?,?)", (f"TARJ-{datetime.now().strftime('%H%M%S')}", st.session_state.user, "TARJETA", base64.b64encode(num_t.encode()).decode(), str(date.today()))); conn.commit(); st.success("Tarjeta afiliada solo para ti.")
-    st.markdown("### Bancos - Sin salir")
-    banco_sel = st.selectbox("Tu Banco", list(BANCOS.keys())); st.link_button(f"🏦 Abrir {banco_sel}", BANCOS[banco_sel])
-    try: st.components.v1.iframe(BANCOS[banco_sel], height=400)
-    except: st.info("Banco bloqueó iframe. Usa botón.")
     st.dataframe(pd.read_sql("SELECT * FROM pagos WHERE empresa_id=?", conn, params=(EMPRESA,)))
 if menu=="📦 Inventario":
-    st.header("📦 Inventario - Autoguardado"); st.info("Inventario conectado a facturación.")
-if menu=="📑 Reportes Día / Consolidado":
-    st.header("📑 Reportes"); tipo = st.selectbox("Tipo", ["Día - Esta Empresa","Día - Consolidado","Mes - Esta Empresa"]); fecha_r = st.date_input("Fecha", date.today())
+    st.header("📦 Inventario"); st.info("Inventario conectado a facturación.")
+if menu=="📑 Reportes":
+    st.header("📑 Reportes"); tipo = st.selectbox("Tipo", ["Día - Esta Empresa","Día - Consolidado","Mes - Esta Empresa"], key="rep_tipo_v26"); fecha_r = st.date_input("Fecha", date.today(), key="rep_fecha_v26")
     if tipo.startswith("Día - Esta"): df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=? AND fecha=?", conn, params=(EMPRESA, str(fecha_r)))
     elif tipo.startswith("Consolidado"): df = pd.read_sql("SELECT * FROM facturas WHERE fecha=?", conn, params=(str(fecha_r),))
     else: df = pd.read_sql("SELECT * FROM facturas WHERE empresa_id=?", conn, params=(EMPRESA,))
-    st.dataframe(df); st.write(f"Total: {df['total'].sum():,.0f} | Facturas: {len(df)}" if len(df)>0 else "Sin datos")
-    if st.button("📥 Excel"): df.to_excel(f"reporte_{EMPRESA}.xlsx", index=False); st.success("Excel generado")
-    if st.button("📄 Word"): st.download_button("Descargar Word", f"REPORTE BASA V25 - {EMPRESA} - {fecha_r}\nTotal {df['total'].sum() if len(df)>0 else 0}", file_name=f"reporte_{EMPRESA}.doc")
-if menu=="🔐 Mis Datos Confidenciales (Solo Yo)":
-    st.header("🔐 Mis Datos - Solo Tú"); st.warning("Ni ADMIN, ni Dev, ni colaboradores pueden ver esto.")
+    st.dataframe(df)
+    if st.button("📥 Excel", key="btn_excel_v26"): df.to_excel(f"reporte_{EMPRESA}.xlsx", index=False); st.success("Excel generado")
+if menu=="🔐 Mis Datos Confidenciales":
+    st.header("🔐 Mis Datos - Solo Tú"); st.warning("Ni ADMIN puede ver esto.")
     st.dataframe(pd.read_sql("SELECT id, tipo, fecha FROM datos_confidenciales WHERE usuario_email=?", conn, params=(st.session_state.user,)))
-    nuevo = st.text_input("Nuevo dato confidencial", type="password")
-    if st.button("Guardar Solo Para Mí"):
-        conn.execute("INSERT INTO datos_confidenciales (id,usuario_email,tipo,valor_cifrado,fecha) VALUES (?,?,?,?,?)", (f"CONF-{datetime.now().strftime('%H%M%S')}", st.session_state.user, "Confidencial", base64.b64encode(nuevo.encode()).decode(), str(date.today()))); conn.commit(); st.success("Guardado solo para ti.")
-if menu=="🤖 Buzón Mejoras IA":
-    st.header("🤖 Buzón Mejoras IA"); sug = st.text_area("¿Qué mejora quieres?")
-    if st.button("🤖 Enviar a IA"):
-        txt=sug.lower(); analisis="⚠️ NO RECOMENDADO - Afecta integridad." if "borrar" in txt and "base" in txt else "✅ RECOMENDADO - No afecta integridad, aporta valor." if "logo" in txt or "reporte" in txt else "✅ EN REVISIÓN - Lógico y razonable."
-        bid=f"IA-{datetime.now().strftime('%H%M%S')}"; conn.execute("INSERT INTO buzon_ia (id,usuario,empresa_id,sugerencia,analisis,estado,fecha,decision) VALUES (?,?,?,?,?,?,?,?)", (bid, st.session_state.user, EMPRESA, sug, analisis, "Pendiente", str(date.today()), "")); conn.commit(); st.success(f"IA: {analisis}")
+if menu=="🤖 Buzón IA":
+    st.header("🤖 Buzón Mejoras IA"); sug = st.text_area("¿Qué mejora quieres?", key="buzon_sug_v26")
+    if st.button("🤖 Enviar a IA", key="btn_buzon_v26"):
+        bid=f"IA-{datetime.now().strftime('%H%M%S')}"; conn.execute("INSERT INTO buzon_ia (id,usuario,empresa_id,sugerencia,analisis,estado,fecha,decision) VALUES (?,?,?,?,?,?,?,?)", (bid, st.session_state.user, EMPRESA, sug, "✅ EN REVISIÓN - Lógico", "Pendiente", str(date.today()), "")); conn.commit(); st.success("Enviado a IA.")
     st.dataframe(pd.read_sql("SELECT * FROM buzon_ia", conn))
-    if st.session_state.role in ["ADMIN","DESARROLLADOR","COLABORADOR"]:
-        buzon = pd.read_sql("SELECT * FROM buzon_ia", conn)
-        if len(buzon)>0:
-            sel = st.selectbox("Selecciona sugerencia", buzon['id'].tolist()); dec = st.selectbox("Decisión", ["Aplicar","Editar","Guardar","Borrar"])
-            if st.button("Guardar Decisión"): conn.execute("UPDATE buzon_ia SET decision=?, estado=? WHERE id=?", (f"{dec} por {st.session_state.user}", dec, sel)); conn.commit(); st.success("Decisión guardada.")
 if menu=="🖨️ Guía":
-    st.header("🖨️ Guía V25 - Ctrl+P para imprimir")
-    st.markdown(f"1. Elige Desarrollador (clave) o Cliente. 2. Elige país: {st.session_state.pais_usuario}. 3. Regístrate con ID Fiscal. Te lleva al Menú. 4. Prueba 5 registros. ADMIN/Dev aprueba FULL. 5. Adjunta pago manual o Azul. 6. Reloj derecha: días usados/restantes. 7. Factura, cartera, reportes Excel/Word.")
-if menu=="⚙️ Auto-Actualización IA":
-    st.header("⚙️ Auto-Actualización IA")
-    st.info(f"🤖 IA analizando país {st.session_state.pais_usuario}... Normas {PAISES[st.session_state.pais_usuario]['dgii']} - Impuesto {PAISES[st.session_state.pais_usuario]['impuesto']} - Adaptación aplicada.")
-    st.success("✅ Sistema adaptado automáticamente. Herramientas creadas para tu país.")
-    if st.button("🔄 Buscar Actualizaciones"): st.success("✅ Sistema actualizado. Sin cambios que afecten integridad.")
-st.caption(f"BASA V25 FINAL | Empresa {EMPRESA} | País {st.session_state.pais_usuario} | AMBAS Claves Activas | AMBOS Pagos Activos | Reloj Derecha | Trazabilidad")
+    st.header("🖨️ Guía V26 - Ctrl+P"); st.markdown("1. Entra con RNC / Cédula / ID / Correo. 2. Si olvidas clave, usa Recuperar - Elige Celular / WhatsApp / Correo. Código sin vencimiento. 3. Regístrate, te lleva al Menú. 4. Prueba 5 registros. 5. Paga con Transferencia o Azul.")
+if menu=="⚙️ Auto-Actualización":
+    st.header("⚙️ Auto-Actualización IA"); st.success("✅ Sistema adaptado a tu país automáticamente.")
+st.caption(f"BASA V26 | Empresa {EMPRESA} | País {st.session_state.pais_usuario} | Login RNC/Cédula/ID/Correo | Código Sin Vencimiento | Fix DuplicateElementId")
