@@ -4,6 +4,14 @@
 # Autoasistencia IA + DGII 606/607/608 + Login RNC/Cédula/Correo
 # ==============================================================================
 
+openpyxl
+xlsxwriter
+sqlalchemy
+fastapi
+cryptography
+lxml
+signxml
+
 # --- Frontend & Visualización Web ---
 streamlit>=1.40.0
 
