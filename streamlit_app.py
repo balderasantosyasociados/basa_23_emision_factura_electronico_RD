@@ -1,3 +1,6 @@
+def asegurar_dependencias():
+    ...
+    
 import sys
 import subprocess
 import importlib.util
