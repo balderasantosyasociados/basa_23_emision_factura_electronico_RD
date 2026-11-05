@@ -1,5 +1,8 @@
 # ==============================================================================
 # 🏦 BASA SUPERSISTEMA V27 - REQUIREMENTS UNIVERSALES
+# Baldera Santos & Asociados SRL | RNC 133378711 | Cuenta BHD ****0021
+# Para TODOS los desarrollos BASA - Mantener igual en todos los proyectos
+# Autoasistencia IA + DGII 606/607/608 + Login RNC/Cédula/Correo
 # ==============================================================================
 
 streamlit>=1.40.0
@@ -25,26 +28,3 @@ signxml>=4.0.0
 
 Pillow>=10.0.0
 python-dateutil>=2.8.2
-
-🏦 BASA SUPERSISTEMA V27
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-AUTONOMÍA BASA
-
-✅ Streamlit
-✅ NumPy
-✅ Pandas
-✅ OpenPyXL
-✅ XlsxWriter
-✅ SQLAlchemy
-✅ FastAPI
-✅ Uvicorn
-✅ Pydantic
-✅ Requests
-✅ Cryptography
-✅ LXML
-✅ SignXML
-✅ Pillow
-✅ Dateutil
-
-ESTADO: 🟢 SISTEMA FULL
