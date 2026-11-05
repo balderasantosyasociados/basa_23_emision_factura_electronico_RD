@@ -1,6 +1,7 @@
 streamlit
 pandas
 openpyxl
+xlsxwriter
 
 # --- Frontend & Visualización Web ---
 streamlit>=1.40.0
