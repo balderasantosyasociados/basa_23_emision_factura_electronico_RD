@@ -1,28 +1,81 @@
-def asegurar_dependencias():
-    ...
-    
-import sys
-import subprocess
-import importlib.util
-
-
-def asegurar_dependencias():
-
-    paquetes = {
-        "streamlit": "streamlit>=1.40.0",
-        "pandas": "pandas>=2.2.0",
-        "openpyxl": "openpyxl>=3.1.5",
-        "xlsxwriter": "xlsxwriter>=3.2.0",
-        "sqlalchemy": "SQLAlchemy>=2.0.0",
-        "fastapi": "fastapi>=0.115.0",
-        "cryptography": "cryptography>=43.0.0",
-        "lxml": "lxml>=5.3.0",
-# BASA SUPERSISTEMA V27 - FIX FINAL subprocess.CalledProcessError - NO usar pip install dentro de la app
+# BASA SUPERSISTEMA V27 - FIX SyntaxError Linea 11 - Llave cerrada
 import streamlit as st
 import importlib.util
 import sqlite3, pandas as pd, os, re, json, hashlib, shutil, base64, smtplib, random, string
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from email.mime.text import MIMEText
+import urllib.parse
+from io import BytesIO
+
+# FIX openpyxl - Import seguro
+try:
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    TIENE_OPENPYXL = True
+except ModuleNotFoundError:
+    openpyxl = None
+    Font = None
+    PatternFill = None
+    get_column_letter = None
+    TIENE_OPENPYXL = False
+except ImportError:
+    openpyxl = None
+    TIENE_OPENPYXL = False
+
+st.set_page_config(page_title="BASA SUPERSISTEMA V27", layout="wide", page_icon="🏦")
+
+# =========================================================
+# AUTONOMÍA BASA - FIX SyntaxError - Diccionario BIEN CERRADO
+# =========================================================
+instalados_basa = []
+faltantes_basa = []
+
+# ✅ ESTE ES EL paquetes = { QUE TE DABA ERROR - AHORA BIEN CERRADO CON }
+paquetes = {
+    "streamlit": "Frontend Web",
+    "pandas": "Datos",
+    "openpyxl": "Excel DGII formato azul",
+    "xlsxwriter": "Excel fallback",
+    "numpy": "Cálculo",
+    "sqlalchemy": "Base de Datos",
+    "fastapi": "API",
+    "requests": "Conectividad",
+    "cryptography": "Firma Electrónica",
+    "lxml": "XML DGII",
+    "signxml": "Firma XML",
+    "PIL": "Imagenes Pillow",
+    "dateutil": "Fechas",
+}  # <-- ESTA LLAVE DE CIERRE ERA LA QUE TE FALTABA
+
+def verificar_requisitos_basa():
+    instalados = []
+    faltantes = []
+    for modulo, uso in paquetes.items():
+        try:
+            if importlib.util.find_spec(modulo) is not None:
+                instalados.append(modulo)
+            else:
+                faltantes.append(f"{modulo} - {uso}")
+        except Exception:
+            faltantes.append(f"{modulo} - {uso}")
+    return instalados, faltantes
+
+try:
+    instalados_basa, faltantes_basa = verificar_requisitos_basa()
+except Exception:
+    instalados_basa = []
+    faltantes_basa = []
+
+if faltantes_basa:
+    st.warning(f"⚠️ Autonomía BASA: Faltan {len(faltantes_basa)} requisitos: {', '.join(faltantes_basa)}. Agregalos a requirements.txt y haz Clear cache + Reboot.")
+else:
+    st.success(f"✅ Autonomía BASA: Todos los {len(instalados_basa)} requisitos instalados. Sistema FULL.")
+
+# A partir de aqui sigue tu codigo normal...
+# BASE = Path("BASA_V27_SUPERSISTEMA") ...
+
 from email.mime.text import MIMEText
 import urllib.parse
 from io import BytesIO
